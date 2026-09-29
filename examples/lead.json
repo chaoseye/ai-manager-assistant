@@ -1,0 +1,9 @@
+{
+  "id": 1234,
+  "pipeline": "Продажи",
+  "stage": "Первичный контакт",
+  "budget": null,
+  "products": [],
+  "tags": [],
+  "contact_name": "Анна"
+}

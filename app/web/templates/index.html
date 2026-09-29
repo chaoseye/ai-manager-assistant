@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI-помощник менеджера</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">AI-помощник менеджера <span class="muted">· демо диалогового окна CRM</span></div>
+  <div class="badges">
+    {% if llm_mode == "mock" %}
+      <span class="badge badge-warn" title="Ответы записаны заранее или найдены по FAQ; модель не вызывается">LLM: mock</span>
+    {% else %}
+      <span class="badge badge-ok" title="Ответы генерирует модель">LLM: {{ llm_model }}</span>
+    {% endif %}
+    <span class="badge" id="kb-badge" title="Версия базы знаний">БЗ: {{ kb_version }}</span>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="card chat" aria-label="Диалог с клиентом">
+    <div class="chat-head">
+      <div class="lead-info">
+        <div class="lead-title" id="lead-title">Новая сделка</div>
+        <div class="muted small" id="lead-sub">Этап не указан · канал не указан</div>
+      </div>
+      <div class="chat-tools">
+        <label class="visually-hidden" for="scenario-select">Готовый сценарий</label>
+        <select id="scenario-select">
+          <option value="">Готовый сценарий…</option>
+        </select>
+        <button type="button" id="new-dialog" class="btn btn-ghost">Новый диалог</button>
+      </div>
+    </div>
+
+    <div class="messages" id="messages" aria-live="polite">
+      <p class="empty muted" id="messages-empty">Выберите сценарий или напишите сообщение от имени клиента.</p>
+    </div>
+
+    <form class="composer" id="composer">
+      <div class="role-switch" role="radiogroup" aria-label="От чьего имени сообщение">
+        <label><input type="radio" name="role" value="client" checked> Клиент</label>
+        <label><input type="radio" name="role" value="manager"> Менеджер</label>
+      </div>
+      <div class="composer-row">
+        <label class="visually-hidden" for="input">Сообщение</label>
+        <textarea id="input" rows="2" placeholder="Сообщение… Enter — отправить, Shift+Enter — новая строка"></textarea>
+        <button type="submit" class="btn btn-primary">Отправить</button>
+      </div>
+    </form>
+  </section>
+
+  <aside class="card assistant" aria-label="AI-помощник">
+    <nav class="tabs" role="tablist">
+      <button type="button" role="tab" class="tab active" data-tab="suggestion" aria-selected="true">Подсказка</button>
+      <button type="button" role="tab" class="tab" data-tab="lead" aria-selected="false">Сделка</button>
+      <button type="button" role="tab" class="tab" data-tab="kb" aria-selected="false">База знаний</button>
+    </nav>
+
+    <div class="tab-panel" id="tab-suggestion" role="tabpanel">
+      <div id="status" class="status muted">Подсказка появится после сообщения клиента.</div>
+      <div id="stale" class="banner" hidden>Менеджер уже ответил — подсказка относится к предыдущему сообщению клиента.</div>
+
+      <div id="suggestion" hidden>
+        <article class="block">
+          <header class="block-head">
+            <h2>Ответ клиенту</h2>
+            <span id="needs-human" class="pill pill-warn" hidden>Нужна проверка</span>
+          </header>
+          <p id="reply-text" class="reply"></p>
+          <p id="needs-human-reason" class="note" hidden></p>
+          <div id="kb-refs" class="chips" aria-label="Основано на записях базы знаний"></div>
+          <div class="actions">
+            <button type="button" id="insert-reply" class="btn btn-primary">Вставить в поле ввода</button>
+            <button type="button" id="copy-reply" class="btn">Копировать</button>
+            <button type="button" id="regenerate" class="btn btn-ghost">Перегенерировать</button>
+          </div>
+        </article>
+
+        <article class="block block-upsell">
+          <header class="block-head">
+            <h2>Допродажа</h2>
+            <span id="upsell-timing" class="pill"></span>
+          </header>
+          <p class="muted small">Видит только менеджер</p>
+          <dl id="upsell-body" class="kv"></dl>
+          <div class="actions">
+            <button type="button" id="copy-pitch" class="btn">Копировать фразу</button>
+          </div>
+        </article>
+
+        <article class="block" id="warnings-block" hidden>
+          <header class="block-head"><h2>Предупреждения проверок</h2></header>
+          <ul id="warnings" class="warnings"></ul>
+        </article>
+
+        <details class="block meta">
+          <summary>Технические данные</summary>
+          <dl id="meta" class="kv"></dl>
+        </details>
+      </div>
+    </div>
+
+    <div class="tab-panel" id="tab-lead" role="tabpanel" hidden>
+      <form id="lead-form" class="form">
+        <label>Имя клиента <input name="contact_name" autocomplete="off"></label>
+        <label>Воронка <input name="pipeline" autocomplete="off"></label>
+        <label>Этап
+          <input name="stage" list="stages" autocomplete="off">
+          <datalist id="stages">
+            <option value="Первичный контакт"></option>
+            <option value="Подбор модели"></option>
+            <option value="Ожидает оплаты"></option>
+            <option value="Монтаж назначен"></option>
+            <option value="Успешно реализовано"></option>
+          </datalist>
+        </label>
+        <label>Бюджет, ₽ <input name="budget" type="number" min="0" step="100"></label>
+        <label>Товары в сделке, через запятую <input name="products" autocomplete="off" placeholder="ac-basic-09, install-standard"></label>
+        <label>Теги, через запятую <input name="tags" autocomplete="off"></label>
+        <label>Канал
+          <select name="channel">
+            <option value="">не указан</option>
+            <option value="telegram">telegram</option>
+            <option value="whatsapp">whatsapp</option>
+            <option value="site">чат на сайте</option>
+          </select>
+        </label>
+        <p class="muted small">Изменения применяются к следующей подсказке.</p>
+      </form>
+    </div>
+
+    <div class="tab-panel" id="tab-kb" role="tabpanel" hidden>
+      <div class="kb-toolbar">
+        <button type="button" id="kb-reload" class="btn">Перезагрузить БЗ</button>
+        <span id="kb-status" class="muted small"></span>
+      </div>
+      <form id="kb-token-form" class="form" hidden>
+        <label>ADMIN_TOKEN <input name="token" type="password" autocomplete="off"></label>
+        <button type="submit" class="btn btn-primary">Открыть</button>
+      </form>
+      <div id="kb-content" class="kb-content"></div>
+    </div>
+  </aside>
+</main>
+
+<div id="toast" class="toast" role="status" hidden></div>
+<script src="{{ url_for('static', path='app.js') }}" defer></script>
+</body>
+</html>

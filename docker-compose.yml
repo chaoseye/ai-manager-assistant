@@ -1,0 +1,13 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      # БЗ можно править без пересборки образа и перезагружать через POST /api/v1/kb/reload.
+      - ./knowledge_base:/app/knowledge_base
+      - ./data:/app/data
+    restart: unless-stopped

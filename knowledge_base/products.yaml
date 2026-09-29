@@ -1,0 +1,100 @@
+# Товары и услуги. id — латиница в kebab-case, цена — целое число в рублях.
+# unit указывается, только если цена не за штуку или услугу целиком.
+
+- id: ac-basic-07
+  name: Сплит-система Basic 07
+  category: Кондиционеры
+  price: 27900
+  description: Кондиционер on/off для помещений до 18 м². Охлаждение и обогрев до −7 °C.
+  for_whom: Небольшая спальня, детская или кабинет до 18 м².
+  related: [install-standard, service-1y, warranty-plus-3y]
+
+- id: ac-basic-09
+  name: Сплит-система Basic 09
+  category: Кондиционеры
+  price: 32900
+  description: Кондиционер on/off для помещений до 25 м². Охлаждение и обогрев до −7 °C.
+  for_whom: Спальня, гостиная или офис до 25 м².
+  related: [install-standard, service-1y, warranty-plus-3y]
+
+- id: ac-basic-12
+  name: Сплит-система Basic 12
+  category: Кондиционеры
+  price: 41900
+  description: Кондиционер on/off для помещений до 35 м². Охлаждение и обогрев до −7 °C.
+  for_whom: Гостиная, кухня-гостиная или офис до 35 м².
+  related: [install-standard, service-1y, warranty-plus-3y]
+
+- id: ac-inverter-09
+  name: Инверторная сплит-система Inverter 09
+  category: Кондиционеры
+  price: 45900
+  description: >-
+    Инверторный кондиционер для помещений до 25 м². Работает тише и на 25–30% экономичнее
+    моделей Basic, обогрев до −15 °C. Поддерживает Wi-Fi модуль.
+  for_whom: Спальня или детская, где важны тишина и экономия; обогрев в межсезонье.
+  related: [install-standard, wifi-module, service-1y, warranty-plus-3y]
+
+- id: ac-inverter-12
+  name: Инверторная сплит-система Inverter 12
+  category: Кондиционеры
+  price: 54900
+  description: >-
+    Инверторный кондиционер для помещений до 35 м². Работает тише и на 25–30% экономичнее
+    моделей Basic, обогрев до −15 °C. Поддерживает Wi-Fi модуль.
+  for_whom: Гостиная или кухня-гостиная, где важны тишина и экономия.
+  related: [install-standard, wifi-module, service-1y, warranty-plus-3y]
+
+- id: install-standard
+  name: Стандартный монтаж
+  category: Монтаж
+  price: 9900
+  description: >-
+    Трасса до 3 м, установка внешнего блока под окном до 3-го этажа (выше — только с балкона
+    или лоджии), вакуумирование системы, пуск и проверка работы.
+  related: [install-extra-route, install-dismantle]
+
+- id: install-extra-route
+  name: Дополнительный метр трассы
+  category: Монтаж
+  price: 1500
+  unit: за метр
+  description: Если трасса между блоками длиннее 3 м.
+
+- id: install-dismantle
+  name: Демонтаж старого кондиционера
+  category: Монтаж
+  price: 3500
+  description: Снятие старого внутреннего и внешнего блоков в тот же выезд, что и монтаж нового.
+
+- id: service-cleaning
+  name: Разовая чистка кондиционера
+  category: Обслуживание
+  price: 3900
+  description: Чистка фильтров и теплообменника внутреннего блока, проверка работы.
+
+- id: service-1y
+  name: "Годовое обслуживание: 2 чистки фильтров и теплообменника"
+  category: Обслуживание
+  price: 5900
+  description: Две выездные чистки в течение года в удобные даты; напоминаем о сроках сами.
+  for_whom: Всем, кто покупает кондиционер с монтажом или уже пользуется кондиционером.
+
+- id: warranty-plus-3y
+  name: Расширенная гарантия +3 года
+  category: Гарантия
+  price: 4900
+  description: Продлевает гарантию на оборудование с 3 до 6 лет.
+
+- id: air-purifier-mini
+  name: Очиститель воздуха Mini с HEPA-фильтром
+  category: Очистка воздуха
+  price: 12900
+  description: Для помещений до 20 м². Задерживает мелкую пыль, пыльцу и шерсть животных.
+  for_whom: Семьи с аллергиками и домашними животными.
+
+- id: wifi-module
+  name: Wi-Fi модуль
+  category: Аксессуары
+  price: 2900
+  description: Управление инверторным кондиционером со смартфона. Подходит только для моделей Inverter.
