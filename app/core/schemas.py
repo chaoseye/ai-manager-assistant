@@ -118,6 +118,7 @@ class Meta(BaseModel):
     suggestion_id: str
     mode: Mode
     llm_mode: str
+    provider: str | None = None  # какая модель ответила: claude, glm, deepseek, kimi, qwen, grok
     model: str
     kb_version: str
     latency_ms: int

@@ -27,7 +27,9 @@ amoCRM: чат сделки ── вебхуки add_message / add_outgoing_mes
    │                                       ├ сделка, контакт, этап, товары: API v4
    │                                       └ база знаний (целиком, кэш)
    │                                                               │
-   │                                     Claude (structured output, 2 блока)
+   │                                     LLM (structured output, 2 блока):
+   │                                       Claude через Anthropic API или любая из
+   │                                       6 моделей через OpenAI-совместимый шлюз
    │                                                               │
    │                                     Проверки: цены, ссылки на БЗ, стоп-фразы
    │                                                               │
@@ -47,7 +49,7 @@ POST /api/v1/suggest ┘
 |---|---|
 | Язык | Python 3.11+ (образ Docker — 3.12) |
 | HTTP-сервис | FastAPI + Uvicorn |
-| LLM | `anthropic` 1.x (официальный SDK, импортируется только в режиме `live`), модель `claude-opus-5-5` |
+| LLM | Claude — `anthropic` 1.x (официальный SDK, импортируется, только когда Claude идёт через Anthropic API), модель `claude-opus-5-5`. GLM-5.3, DeepSeek V4 Pro, Kimi K3, Qwen3.8-Max, Grok 4.7 (и Claude без ключа Anthropic) — через OpenAI-совместимый шлюз (New API, OpenRouter, LiteLLM) по httpx |
 | HTTP-клиент amoCRM | httpx (async); в mock-режиме и тестах — `httpx.MockTransport` с поддельным сервером |
 | Схемы и настройки | Pydantic v2, pydantic-settings |
 | БЗ | PyYAML + Markdown-файлы |
@@ -69,11 +71,15 @@ Testovoe_O_Complex/
 │   ├── logging_setup.py         # JSON-логи с request_id
 │   ├── scenarios.py             # сценарии демо и имитатора (examples/scenarios)
 │   ├── cli.py                   # CLI-скрипт (F-01)
+│   ├── setup_gateway.py         # адрес и ключ шлюза LLM в .env с проверкой ключа и моделей
 │   ├── core/
 │   │   ├── assistant.py         # Assistant: подготовка запроса → LLM с повторами → проверки → результат
 │   │   ├── prompts.py           # системный промпт, user-сообщение, защита тегов разметки
 │   │   ├── schemas.py           # SuggestRequest, DialogMessage, LeadContext, Suggestion, Upsell, Meta
 │   │   ├── llm.py               # интерфейс LLMClient, AnthropicLLMClient, ошибки LLM
+│   │   ├── providers.py         # модели для переключения и их особенности (формат, рассуждения)
+│   │   ├── gateway_llm.py       # GatewayLLMClient: модель через OpenAI-совместимый шлюз
+│   │   ├── llm_registry.py      # LLMRegistry: какой клиент за какую модель, запасные модели
 │   │   ├── mock_llm.py          # MockLLMClient: заранее составленные ответы + поиск по FAQ
 │   │   ├── guards.py            # проверки и исправления результата
 │   │   ├── money.py             # формат «32 900 ₽» и извлечение сумм из текста
@@ -103,6 +109,7 @@ Testovoe_O_Complex/
 │   │   ├── kb.py                # GET /api/v1/kb, POST /api/v1/kb/reload
 │   │   ├── health.py            # GET /health
 │   │   ├── demo.py              # GET / и /amocrm (страницы), GET /api/v1/demo/scenarios
+│   │   ├── llm.py               # GET /api/v1/llm/providers — модели и их состояние
 │   │   ├── webhooks.py          # POST /webhooks/amocrm/{secret}
 │   │   ├── amocrm_mock.py       # /api/v1/amocrm-mock: notes, leads, feed, messages (только mock-режим)
 │   │   ├── widget.py            # GET /api/v1/leads/{id}/suggestion, regenerate (этап 3)
@@ -136,10 +143,13 @@ Testovoe_O_Complex/
 
 | Модуль | Отвечает за | Зависит от |
 |---|---|---|
-| `core/assistant.py` | `prepare_request()`: обрезка истории до `HISTORY_LIMIT`, маскирование ПДн в обращении, истории и `replies`. `suggest(request, mode)`: промпты, вызов LLM с повторами (обрезанный ответ — один раз с удвоенным лимитом; невалидный или пустой — ещё одна попытка), проверки, `meta`, лог | `kb`, `llm`, `guards`, `pii`, `prompts` |
+| `core/assistant.py` | `prepare_request()`: обрезка истории до `HISTORY_LIMIT`, маскирование ПДн в обращении, истории и `replies`. `suggest(request, mode, provider)`: промпты, вызов модели с повторами (обрезанный ответ — один раз с удвоенным лимитом; невалидный или пустой — ещё одна попытка), при сбое модели по умолчанию — запасные с предупреждением `llm_fallback`, проверки, `meta` (с `provider`), лог | `kb`, `llm_registry`, `guards`, `pii`, `prompts` |
 | `core/prompts.py` | Системный промпт (правила + тон + вся БЗ) и user-сообщение (`<lead>`, `<history>`, `<new_message>`, `<replies>`, `<task>`). В пользовательском тексте «ломаются» теги разметки, чтобы клиент не мог закрыть `<new_message>` | `kb` |
 | `core/schemas.py` | Pydantic-модели входа и выхода ядра. Описания полей `Suggestion` попадают в JSON-схему для модели | — |
 | `core/llm.py` | `AnthropicLLMClient`: `beta.messages.create` с `output_config` (effort + JSON-схема), `cache_control` на системном промпте, `fallbacks="default"`. Проверка учётных данных до запроса, разбор `stop_reason` (`refusal`, `max_tokens`) до чтения ответа, валидация JSON своей моделью, учёт `usage`, перевод ошибок SDK в `LLMUnavailableError` / `LLMRefusedError` / `LLMTruncatedError` / `LLMBadOutputError`. SDK импортируется лениво | `anthropic` |
+| `core/providers.py` | `ProviderSpec` для шести моделей: какой `response_format` просить, уровни `reasoning_effort`, дополнительные поля (`enable_thinking: false` у Qwen); `map_effort()` приводит `LLM_EFFORT` к уровням модели | `config` |
+| `core/gateway_llm.py` | `GatewayLLMClient`: `POST {LLM_GATEWAY_URL}/chat/completions`, схема ответа и в `response_format`, и в системном промпте; упрощение запроса на 400 (без рассуждений → `json_object` → без формата) с запоминанием; повторы на 429/5xx/сетевых ошибках; ошибки ключа, баланса, модели и адреса — без повторов, с подсказкой настройки; разбор `finish_reason` до текста, извлечение JSON из `<think>` и ```` ``` ````, `usage` в формате Anthropic | httpx, `providers`, `llm` |
+| `core/llm_registry.py` | `build_llms()`: в mock-режиме на все модели отвечает `MockLLMClient`; в live — Claude через Anthropic API (если есть ключ или шлюз не настроен), остальные через шлюз. `LLMRegistry`: модель по умолчанию, запасные (`chain()`), `describe()` для API и страницы, `check_gateway()` — при старте отмечает недоступными модели, которых нет в `GET /models` шлюза | `llm`, `gateway_llm`, `mock_llm` |
 | `core/mock_llm.py` | Ответ по совпадению текста обращения с записью из `examples/mock_llm/`, иначе — по похожему вопросу FAQ, иначе — «уточню» с `needs_human` | `llm`, `kb` |
 | `core/guards.py` | Проверки из [FUNCTIONALITY.md, 3.7](FUNCTIONALITY.md#37-проверки-результата-f-06): суммы, ссылки, товары, допродажа при жалобе, стоп-фразы, длина | `kb`, `money` |
 | `core/money.py` | `format_rub()` и `extract_amounts()` — суммы только с явной валютой (₽, руб., р.) | — |
@@ -159,10 +169,11 @@ Testovoe_O_Complex/
 | `scenarios.py` | Модель и загрузка сценариев (без FastAPI и SDK — её импортирует имитатор) | `core/schemas` |
 | `api/*` | HTTP-роуты, проверка токенов, единый формат ошибок | `core`, `storage`, `worker` |
 | `web/*` | Страницы демо: прямой вызов (`/`) и карточка сделки поддельного amoCRM (`/amocrm`); общий JS — `common.js` | `api` |
-| `cli.py` | Разбор аргументов, вызов ядра, вывод, коды возврата | `core` |
+| `cli.py` | Разбор аргументов (включая `--provider`), вызов ядра, вывод, коды возврата | `core` |
+| `setup_gateway.py` | Команда подключения шлюза: ключ вводится скрыто или из stdin, проверяется запросом `GET /models` (токены не тратятся), сохраняется в `.env` вместе с адресом; показывает, каких моделей помощника нет в шлюзе | httpx, `config` |
 | `config.py` | Settings (раздел 11); относительные пути считаются от корня проекта; `amocrm_config_errors()` | pydantic-settings |
 | `logging_setup.py` | JSON-формат логов, `request_id` из middleware | — |
-| `main.py` | Сборка приложения и его жизненный цикл: неполные настройки amoCRM — сервис не стартует | всё |
+| `main.py` | Сборка приложения и его жизненный цикл: неполные настройки amoCRM — сервис не стартует; в режиме `live` — проверка моделей шлюза | всё |
 
 ## 6. Путь обработки обращения
 
@@ -171,7 +182,7 @@ Testovoe_O_Complex/
 2. `Assistant.suggest()`:
    - `prepare_request()` обрезает историю и маскирует ПДн;
    - системный промпт берётся из кэша по версии БЗ, user-сообщение собирается заново;
-   - `llm.generate()` вызывает модель, при необходимости с повторами;
+   - `llm.generate()` вызывает выбранную модель (или модель по умолчанию, а при её сбое — запасные), при необходимости с повторами;
    - `apply_guards()` проверяет и исправляет результат;
    - возвращается `SuggestResult`: `suggestion` + `meta`.
 3. REST и демо сохраняют результат в `suggestions` вместе с подготовленным (замаскированным) запросом: его можно найти по id, а на этапе 3 к нему привяжется обратная связь. CLI ничего не сохраняет.
@@ -196,7 +207,8 @@ Testovoe_O_Complex/
 
 | Метод | Путь | Доступ | Назначение |
 |---|---|---|---|
-| POST | `/api/v1/suggest` | Открыт; если задан `API_TOKEN` — `Authorization: Bearer` | Ядро: обращение → два блока |
+| POST | `/api/v1/suggest` | Открыт; если задан `API_TOKEN` — `Authorization: Bearer` | Ядро: обращение → два блока. `?provider=claude\|glm\|deepseek\|kimi\|qwen\|grok` — выбрать модель (без запасных); без параметра — `LLM_PROVIDER` и запасные |
+| GET | `/api/v1/llm/providers` | Как у `/suggest` | Модели для переключения: `{mode, default, fallbacks, gateway_check, providers: [{id, name, model, route, available, problem, default}]}`; `gateway_check` — `ok`, текст ошибки проверки шлюза или `null` |
 | GET | `/api/v1/suggestions/{id}` | Как у `/suggest` | Сохранённый результат с замаскированным запросом |
 | GET | `/api/v1/kb` | `ADMIN_TOKEN`, если задан | Версия и содержимое БЗ |
 | POST | `/api/v1/kb/reload` | `ADMIN_TOKEN`, если задан | Перезагрузка БЗ: `200 {version, changed, counts}` или `422 kb_invalid` со списком ошибок |
@@ -218,9 +230,12 @@ Testovoe_O_Complex/
 **`/health`:**
 ```json
 {"status": "ok", "version": "0.1.0", "kb_version": "225b0436edc6", "llm_mode": "live",
- "llm_model": "claude-opus-5-5", "amocrm": "mock", "queue": {"done": 12, "pending": 1}, "worker": "running"}
+ "llm_provider": "claude", "llm_model": "claude-opus-5-5",
+ "llm_providers": {"claude": {"model": "claude-opus-5-5", "route": "anthropic", "available": true},
+                   "kimi": {"model": "kimi-k3", "route": "gateway", "available": true}, "...": "..."},
+ "amocrm": "mock", "queue": {"done": 12, "pending": 1}, "worker": "running"}
 ```
-`status` становится `degraded`, а в ответе появляются `llm_problem` / `amocrm_problem`, если в режиме `live` нет учётных данных Claude API или amoCRM отклонил токен при старте. `queue` и `worker` есть, только когда интеграция с amoCRM включена.
+`status` становится `degraded`, а в ответе появляются `llm_problem` / `amocrm_problem`, если у модели по умолчанию нет доступа (нет ключа Claude API, не настроен шлюз) или amoCRM отклонил токен при старте. Остальные модели на статус не влияют. `llm_providers` есть только в режиме `live`. `available` означает, что доступ настроен и модель есть в списке моделей шлюза для ключа. Список запрашивается один раз при старте; `/health` сам шлюз не опрашивает. `queue` и `worker` есть, только когда интеграция с amoCRM включена.
 
 **`POST /api/v1/suggest` — запрос:**
 ```json
@@ -245,6 +260,7 @@ Testovoe_O_Complex/
     "suggestion_id": "1e92feaf11f8481199135b16b3aba582",
     "mode": "full",
     "llm_mode": "live",
+    "provider": "claude",
     "model": "claude-opus-5-5",
     "kb_version": "225b0436edc6",
     "latency_ms": 8400,
@@ -257,16 +273,16 @@ Testovoe_O_Complex/
 }
 ```
 
-`meta.model` — модель, которая фактически ответила: при срабатывании fallback она отличается от `LLM_MODEL`.
+`meta.provider` и `meta.model` — модель, которая фактически ответила: при срабатывании запасной модели или серверного fallback Anthropic они отличаются от выбранных.
 
 **Ошибки** возвращаются в едином формате `{"error": {"code": "...", "message": "...", "details"?: ...}}`:
 - `401 unauthorized` — нет или неверный токен;
 - `404 not_found`;
-- `422 invalid_request` — некорректный запрос, в `details` — ошибки полей;
+- `422 invalid_request` — некорректный запрос, в `details` — ошибки полей; неизвестная модель в `?provider=`;
 - `422 kb_invalid` — БЗ не прошла проверку при перезагрузке;
 - `502 llm_refused` — модель отказала и fallback не помог;
 - `502 llm_bad_output` — ответ модели не соответствует схеме после повтора;
-- `503 llm_unavailable` — сеть, лимиты, 5xx или нет учётных данных;
+- `503 llm_unavailable` — сеть, лимиты, 5xx, нет учётных данных, шлюз не настроен, не принял ключ или не знает модель;
 - `500 internal`.
 
 ## 8. Модель данных (SQLite)
@@ -410,13 +426,18 @@ id всех записей — латиница в kebab-case, уникальн�
 
 | Переменная | По умолчанию | Назначение |
 |---|---|---|
-| `LLM_MODE` | `mock` | `mock` — без модели; `live` — Claude API |
-| `ANTHROPIC_API_KEY` | — | Ключ Claude API для `live` (или профиль `ant auth login`) |
-| `LLM_MODEL` | `claude-opus-5-5` | Модель |
-| `LLM_EFFORT` | `medium` | Глубина рассуждений: `low` / `medium` / `high` / `xhigh` / `max` |
+| `LLM_MODE` | `mock` | `mock` — без модели; `live` — настоящие модели |
+| `LLM_PROVIDER` | `claude` | Модель по умолчанию: `claude` / `glm` / `deepseek` / `kimi` / `qwen` / `grok` — для amoCRM и запросов без выбора |
+| `LLM_FALLBACK_PROVIDERS` | — | Запасные модели через запятую, по порядку: если модель по умолчанию не ответила |
+| `ANTHROPIC_API_KEY` | — | Ключ Claude API (или профиль `ant auth login`). Если не задан, а шлюз настроен, Claude идёт через шлюз |
+| `LLM_MODEL` | `claude-opus-5-5` | Модель Claude в Anthropic API |
+| `LLM_EFFORT` | `medium` | Глубина рассуждений: `low` / `medium` / `high` / `xhigh` / `max`; для моделей шлюза приводится к их уровням |
 | `LLM_MAX_TOKENS` | `8000` | Лимит вывода, включая рассуждения; при обрезке — один повтор с удвоенным лимитом |
-| `LLM_TIMEOUT_SECONDS` | `60` | Таймаут запроса к LLM (SDK повторяет ещё до 2 раз) |
-| `LLM_FALLBACKS` | `true` | Серверный fallback при отказе модели |
+| `LLM_TIMEOUT_SECONDS` | `60` | Таймаут запроса к LLM (SDK и клиент шлюза повторяют ещё до 2 раз) |
+| `LLM_FALLBACKS` | `true` | Серверный fallback Anthropic API при отказе модели |
+| `LLM_GATEWAY_URL` | — | Адрес OpenAI-совместимого API шлюза, обычно `https://<шлюз>/v1`. Задаётся командой `python -m app.setup_gateway` |
+| `LLM_GATEWAY_KEY` | — | Ключ шлюза |
+| `LLM_GATEWAY_MODEL_CLAUDE` … `_GROK` | `claude-opus-5`, `glm-5.3`, `deepseek-v4-pro`, `kimi-k3`, `qwen3.8-max`, `grok-4.7` | id моделей в шлюзе (по умолчанию — как в New API) |
 | `KB_DIR` | `knowledge_base` | Каталог БЗ |
 | `HISTORY_LIMIT` | `20` | Сколько последних сообщений передавать модели |
 | `PII_MASKING` | `true` | Маскировать ПДн перед LLM |
@@ -460,10 +481,13 @@ tests/
 ├── test_guards.py                 # правила сумм, ссылки, товары, жалоба, стоп-фразы, upsell_only
 ├── test_assistant.py              # meta, ПДн, лимит истории, повторы, ошибки
 ├── test_llm_client.py             # параметры запроса к SDK, разбор ответа, ошибки SDK, нет ключа
+├── test_gateway_llm.py            # клиент шлюза на поддельном HTTP: запрос по моделям, разбор, упрощение, ошибки
+├── test_llm_registry.py           # реестр, маршруты, запасные модели, ?provider=, /api/v1/llm/providers, выбор на странице
+├── test_setup_gateway.py          # команда подключения шлюза: .env, проверка ключа, подсказки по моделям
 ├── test_mock_llm_and_scenarios.py # ответы mock проходят проверки, сценарии end-to-end, FAQ, лёгкие импорты
 ├── test_api.py                    # эндпоинты, токены, коды ошибок, сохранение, перезагрузка БЗ
-├── test_cli.py                    # текстовый и JSON-вывод, stdin, коды возврата
-├── test_eval_runner.py            # кейсы валидны, проверки eval, отчёт в mock-режиме
+├── test_cli.py                    # текстовый и JSON-вывод, stdin, коды возврата, --provider
+├── test_eval_runner.py            # кейсы валидны, проверки eval, отчёт в mock-режиме, сравнение моделей
 ├── test_amocrm_webhooks.py        # разбор вебхуков по примерам документации: форма, JSON, вложения, порядок
 ├── test_amocrm_client.py          # клиент против поддельного сервера: чтение, кэш, примечания, повторы, лимит; контекст
 ├── test_worker.py                 # очередь: пауза, дубли, режимы, stale, вложения, повторы, сбои, перезапуск, очистка
@@ -471,7 +495,7 @@ tests/
 └── test_amocrm_tools.py           # имитатор end-to-end через TestClient, регистрация вебхука
 evals/
 ├── cases.yaml                     # 31 кейс: вход + ожидаемые свойства результата
-├── run_eval.py                    # прогон, проверки, метрики, стоимость, отчёт, --record
+├── run_eval.py                    # прогон, проверки, метрики, стоимость, отчёт, --provider (all — сравнение), --record
 └── reports/                       # отчёты прогонов в Markdown
 ```
 

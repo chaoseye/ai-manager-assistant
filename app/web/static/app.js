@@ -166,8 +166,13 @@ async function requestSuggestion() {
     lead: leadPayload(),
     channel: channelValue(),
   };
+  // Модель по умолчанию не передаём: тогда, если она не ответит, сработают запасные (LLM_FALLBACK_PROVIDERS).
+  const picked = $("llm-provider")?.selectedOptions[0];
+  const url = picked && !picked.dataset.default
+    ? `/api/v1/suggest?provider=${encodeURIComponent(picked.value)}`
+    : "/api/v1/suggest";
   try {
-    const response = await fetch("/api/v1/suggest", {
+    const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -243,7 +248,7 @@ function renderSuggestion({ suggestion: s, meta }) {
   const metaList = $("meta");
   metaList.replaceChildren();
   const usage = meta.usage;
-  addKv(metaList, "Модель", `${meta.model} (${meta.llm_mode})`);
+  addKv(metaList, "Модель", meta.provider ? `${meta.model} (${meta.provider}, ${meta.llm_mode})` : `${meta.model} (${meta.llm_mode})`);
   addKv(metaList, "Тема / настроение", `${INTENT[s.intent] || s.intent} / ${SENTIMENT[s.sentiment] || s.sentiment}`);
   addKv(metaList, "Задержка", `${meta.latency_ms} мс, попыток: ${meta.attempts}`);
   addKv(metaList, "Токены", `вход ${usage.input_tokens}, кэш ${usage.cache_read_input_tokens}, выход ${usage.output_tokens}`);
@@ -405,6 +410,19 @@ function init() {
   $("copy-reply").addEventListener("click", () => state.suggestion && copyText(state.suggestion.suggestion.client_reply));
   $("copy-pitch").addEventListener("click", () => state.suggestion && copyText(state.suggestion.suggestion.upsell.pitch));
   $("regenerate").addEventListener("click", requestSuggestion);
+
+  // Выбор модели (только в режиме live): запоминаем между визитами.
+  const providerSelect = $("llm-provider");
+  if (providerSelect) {
+    try {
+      const saved = localStorage.getItem("llmProvider");
+      const option = [...providerSelect.options].find((o) => o.value === saved);
+      if (option && !option.disabled) providerSelect.value = saved;
+    } catch { /* хранилище недоступно */ }
+    providerSelect.addEventListener("change", () => {
+      try { localStorage.setItem("llmProvider", providerSelect.value); } catch { /* хранилище недоступно */ }
+    });
+  }
 
   $("scenario-select").addEventListener("change", (event) => applyScenario(event.target.value));
   $("new-dialog").addEventListener("click", () => {

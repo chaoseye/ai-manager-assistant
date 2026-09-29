@@ -1,7 +1,10 @@
-"""Клиент LLM: интерфейс и реализация на официальном SDK Anthropic.
+"""Клиент LLM: интерфейс, ошибки и реализация на официальном SDK Anthropic.
 
-SDK импортируется лениво, при создании клиента для LLM_MODE=live: он тяжёлый (секунды на импорт),
-а CLI, имитатор amoCRM и тесты в mock-режиме без него обходятся.
+Другие модели идут через OpenAI-совместимый шлюз (app/core/gateway_llm.py); какой клиент отвечает
+за какую модель, решает реестр (app/core/llm_registry.py).
+
+SDK Anthropic импортируется лениво, при создании клиента для Claude: он тяжёлый (секунды на импорт),
+а CLI, имитатор amoCRM, тесты в mock-режиме и работа только через шлюз без него обходятся.
 """
 
 import logging
@@ -75,7 +78,7 @@ class LLMResponse:
 
 
 class LLMClient(Protocol):
-    mode: str
+    mode: str  # live или mock
     model: str
 
     @property
@@ -96,6 +99,8 @@ class AnthropicLLMClient:
     """Claude через beta.messages.create: structured output + кэш системного промпта + fallback."""
 
     mode = "live"
+    provider = "claude"
+    route = "anthropic"
 
     def __init__(self, settings: Settings, client: Any | None = None):
         self._settings = settings
@@ -174,11 +179,3 @@ class AnthropicLLMClient:
             raise LLMBadOutputError(f"Ответ модели не соответствует схеме: {exc}", usage) from exc
 
         return LLMResponse(suggestion=suggestion, model=response.model, usage=usage)
-
-
-def build_llm_client(settings: Settings) -> LLMClient:
-    if settings.llm_mode == "mock":
-        from app.core.mock_llm import MockLLMClient
-
-        return MockLLMClient(settings.mock_llm_dir)
-    return AnthropicLLMClient(settings)

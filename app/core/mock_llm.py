@@ -108,6 +108,7 @@ def faq_fallback(message: str, kb: KnowledgeBase, contact_name: str | None) -> S
 class MockLLMClient:
     mode = "mock"
     model = "mock"
+    route = "mock"
     problem = None
 
     def __init__(self, recordings_dir: Path):

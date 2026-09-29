@@ -12,7 +12,8 @@ router = APIRouter(tags=["health"])
 @router.get("/health", summary="Состояние сервиса")
 async def health(request: Request) -> dict[str, Any]:
     state = request.app.state
-    llm = state.assistant.llm
+    llms = state.assistant.llms
+    llm = llms.default_client
     problems: dict[str, str] = {}
     if getattr(llm, "problem", None):
         problems["llm_problem"] = llm.problem
@@ -24,10 +25,17 @@ async def health(request: Request) -> dict[str, Any]:
         "version": __version__,
         "kb_version": state.kb_store.current.version,
         "llm_mode": llm.mode,
+        "llm_provider": llms.default,
         "llm_model": llm.model,
         "amocrm": state.settings.amocrm_mode,
         **problems,
     }
+    if llm.mode != "mock":
+        # Остальные модели на статус не влияют: без них работает всё, кроме их выбора.
+        body["llm_providers"] = {
+            item["id"]: {"model": item["model"], "route": item["route"], "available": item["available"]}
+            for item in llms.describe()
+        }
     jobs = getattr(state, "jobs", None)
     if jobs is not None:
         worker = state.worker

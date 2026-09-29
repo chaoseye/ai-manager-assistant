@@ -22,10 +22,13 @@ async def scenarios(settings: Settings = Depends(get_settings_dep)) -> list[Scen
 
 def _page_context(request: Request, active: str) -> dict[str, object]:
     state = request.app.state
+    llms = state.assistant.llms
     return {
         "active": active,
-        "llm_mode": state.assistant.llm.mode,
-        "llm_model": state.assistant.llm.model,
+        "llm_mode": llms.default_client.mode,
+        "llm_model": llms.default_client.model,
+        "llm_label": llms.label(llms.default),
+        "providers": llms.describe(),
         "kb_version": state.kb_store.current.version,
         "amocrm_mode": state.settings.amocrm_mode,
         "debounce_seconds": state.settings.debounce_seconds,

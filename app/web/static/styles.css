@@ -116,6 +116,12 @@ body {
 }
 .badge-warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
 .badge-ok { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.badge-select { display: inline-flex; align-items: center; gap: 4px; padding-block: 0; }
+.badge-select select {
+  font-size: 12px; color: inherit; background: transparent; border: 0; padding: 3px 0; max-width: 220px;
+  cursor: pointer;
+}
+.badge-select select option { color: var(--text); background: var(--surface); }
 
 /* ---------- Раскладка ---------- */
 

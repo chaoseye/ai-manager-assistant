@@ -3,10 +3,10 @@
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal, get_args
 
 from pydantic import field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -15,6 +15,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 ON_VERCEL = bool(os.environ.get("VERCEL"))
 
 Effort = Literal["low", "medium", "high", "xhigh", "max"]
+# Модели, между которыми можно переключаться. Особенности каждой — в app/core/providers.py.
+ProviderId = Literal["claude", "glm", "deepseek", "kimi", "qwen", "grok"]
+PROVIDER_IDS: tuple[str, ...] = get_args(ProviderId)
 
 
 class Settings(BaseSettings):
@@ -26,12 +29,28 @@ class Settings(BaseSettings):
 
     # LLM
     llm_mode: Literal["live", "mock"] = "mock"
-    llm_model: str = "claude-opus-5-5"
+    # Модель по умолчанию: для amoCRM и запросов, где модель не выбрана.
+    llm_provider: ProviderId = "claude"
+    # Запасные модели по порядку — если модель по умолчанию не ответила. В .env — через запятую.
+    llm_fallback_providers: Annotated[list[ProviderId], NoDecode] = []
+    llm_model: str = "claude-opus-5-5"  # Claude через Anthropic API
     llm_effort: Effort = "medium"
     llm_max_tokens: int = 8000
     llm_timeout_seconds: float = 60.0
-    llm_fallbacks: bool = True
+    llm_fallbacks: bool = True  # серверный fallback Anthropic API
     anthropic_api_key: str | None = None
+
+    # Шлюз (агрегатор) с OpenAI-совместимым API: New API, OpenRouter, LiteLLM…
+    # Claude идёт через Anthropic API, если задан ANTHROPIC_API_KEY или шлюз не настроен; иначе — через шлюз.
+    llm_gateway_url: str | None = None  # например, https://<шлюз>/v1
+    llm_gateway_key: str | None = None
+    # id моделей в шлюзе; по умолчанию — как в New API.
+    llm_gateway_model_claude: str = "claude-opus-5"
+    llm_gateway_model_glm: str = "glm-5.3"
+    llm_gateway_model_deepseek: str = "deepseek-v4-pro"
+    llm_gateway_model_kimi: str = "kimi-k3"
+    llm_gateway_model_qwen: str = "qwen3.8-max"
+    llm_gateway_model_grok: str = "grok-4.7"
 
     # Ядро
     kb_dir: Path = Path("knowledge_base")
@@ -79,6 +98,8 @@ class Settings(BaseSettings):
 
     @field_validator(
         "anthropic_api_key",
+        "llm_gateway_url",
+        "llm_gateway_key",
         "api_token",
         "admin_token",
         "amocrm_subdomain",
@@ -94,12 +115,33 @@ class Settings(BaseSettings):
             return None
         return value
 
+    @field_validator("llm_fallback_providers", mode="before")
+    @classmethod
+    def _split_providers(cls, value: object) -> object:
+        # LLM_FALLBACK_PROVIDERS=glm,qwen — список через запятую, пустая строка — без запасных.
+        if isinstance(value, str):
+            return [part.strip() for part in value.split(",") if part.strip()]
+        return value
+
+    @field_validator("llm_gateway_url", mode="after")
+    @classmethod
+    def _strip_slash(cls, value: str | None) -> str | None:
+        return value.strip().rstrip("/") if value else value
+
     @field_validator("kb_dir", "mock_llm_dir", "scenarios_dir", "db_path", "amocrm_mock_seed", mode="after")
     @classmethod
     def _resolve_path(cls, value: Path) -> Path:
         # Относительные пути считаются от корня проекта, а не от текущего каталога:
         # так CLI и сервис работают одинаково, откуда бы их ни запустили.
         return value if value.is_absolute() else (BASE_DIR / value).resolve()
+
+    @property
+    def gateway_configured(self) -> bool:
+        return bool(self.llm_gateway_url and self.llm_gateway_key)
+
+    def gateway_model(self, provider: str) -> str:
+        """id модели провайдера в шлюзе (LLM_GATEWAY_MODEL_<PROVIDER>)."""
+        return getattr(self, f"llm_gateway_model_{provider}")
 
     @property
     def amocrm_api_base(self) -> str:

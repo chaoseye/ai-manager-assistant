@@ -13,10 +13,12 @@ from app import __version__
 from app.amocrm.client import AmoClient
 from app.amocrm.factory import build_amo_client, check_amocrm
 from app.api import amocrm_mock, demo, health, kb, suggest, webhooks
+from app.api import llm as llm_api
 from app.api.errors import register_error_handlers
 from app.config import Settings, get_settings
 from app.core.assistant import Assistant
-from app.core.llm import LLMClient, build_llm_client
+from app.core.llm import LLMClient
+from app.core.llm_registry import LLMRegistry, build_llms
 from app.kb.loader import KnowledgeStore
 from app.logging_setup import configure_logging, request_id_var
 from app.storage.db import Database
@@ -33,10 +35,10 @@ class ConfigError(RuntimeError):
 def create_app(
     settings: Settings | None = None,
     *,
-    llm: LLMClient | None = None,
+    llm: LLMRegistry | LLMClient | None = None,
     amo_transport: httpx.AsyncBaseTransport | None = None,
 ) -> FastAPI:
-    """settings, llm и транспорт amoCRM можно подменить в тестах."""
+    """settings, llm (реестр моделей или один клиент) и транспорт amoCRM можно подменить в тестах."""
     settings = settings or get_settings()
 
     @asynccontextmanager
@@ -48,7 +50,12 @@ def create_app(
         kb_store = KnowledgeStore(settings.kb_dir)  # ошибка в БЗ — сервис не стартует
         db = Database(settings.db_path)
         await db.connect()
-        assistant = Assistant(kb_store, llm or build_llm_client(settings), settings)
+        llms = llm
+        if llms is None:
+            llms = build_llms(settings)
+            # Какие модели доступны ключу шлюза: один бесплатный запрос, не дольше 10 с.
+            await llms.check_gateway(settings)
+        assistant = Assistant(kb_store, llms, settings)
         suggestions = SuggestionRepo(db)
         app.state.settings = settings
         app.state.kb_store = kb_store
@@ -109,6 +116,7 @@ def create_app(
         return response
 
     app.include_router(suggest.router)
+    app.include_router(llm_api.router)
     app.include_router(kb.router)
     app.include_router(health.router)
     app.include_router(demo.router)

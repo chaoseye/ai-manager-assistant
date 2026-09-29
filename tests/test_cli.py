@@ -69,6 +69,12 @@ def test_llm_error_exit_code(monkeypatch, capsys):
     from app.core.llm import LLMUnavailableError
     from tests.conftest import FakeLLM
 
-    monkeypatch.setattr(cli, "build_llm_client", lambda settings: FakeLLM(LLMUnavailableError("нет сети")))
+    monkeypatch.setattr(cli, "build_llms", lambda settings: FakeLLM(LLMUnavailableError("нет сети")))
     assert cli.main(["?"]) == cli.EXIT_LLM
     assert "нет сети" in capsys.readouterr().err
+
+
+def test_provider_option(capsys):
+    assert cli.main(["Сколько длится монтаж?", "--provider", "deepseek", "--json"]) == cli.EXIT_OK
+    meta = json.loads(capsys.readouterr().out)["meta"]
+    assert meta["provider"] == "deepseek" and meta["llm_mode"] == "mock"

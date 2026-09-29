@@ -9,8 +9,17 @@
   <div class="badges">
     {% if llm_mode == "mock" %}
       <span class="badge badge-warn" title="Ответы записаны заранее или найдены по FAQ; модель не вызывается">LLM: mock</span>
+    {% elif active == "direct" %}
+      <label class="badge badge-ok badge-select" title="Модель для следующих подсказок">
+        <span>LLM:</span>
+        <select id="llm-provider" aria-label="Модель для подсказок">
+          {% for p in providers %}
+          <option value="{{ p.id }}"{% if p.default %} selected data-default="1"{% endif %}{% if not p.available %} disabled{% endif %}>{{ p.name }} · {{ p.model }}{% if not p.available %} — недоступна{% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
     {% else %}
-      <span class="badge badge-ok" title="Ответы генерирует модель">LLM: {{ llm_model }}</span>
+      <span class="badge badge-ok" title="Модель по умолчанию (LLM_PROVIDER): ею AI-помощник отвечает в сделках">LLM: {{ llm_label }}</span>
     {% endif %}
     <span class="badge{% if amocrm_mode == 'live' %} badge-ok{% elif amocrm_mode == 'mock' %} badge-warn{% endif %}" title="Режим интеграции с amoCRM">amoCRM: {{ amocrm_mode }}</span>
     <span class="badge" id="kb-badge" title="Версия базы знаний">БЗ: {{ kb_version }}</span>

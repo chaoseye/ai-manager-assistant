@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.deps import get_assistant, get_repo, require_api_token
 from app.core.assistant import Assistant
@@ -15,10 +15,19 @@ router = APIRouter(prefix="/api/v1", tags=["suggest"], dependencies=[Depends(req
 @router.post("/suggest", response_model=SuggestResult, summary="Обращение → ответ клиенту и подсказка")
 async def suggest(
     request: SuggestRequest,
+    provider: str | None = Query(
+        default=None,
+        description="Модель: claude, glm, deepseek, kimi, qwen, grok. По умолчанию — LLM_PROVIDER "
+        "(и запасные из LLM_FALLBACK_PROVIDERS, если она не ответит)",
+    ),
     assistant: Assistant = Depends(get_assistant),
     repo: SuggestionRepo = Depends(get_repo),
 ) -> SuggestResult:
-    result = await assistant.suggest(request)
+    known = assistant.llms.ids()
+    if provider is not None and provider not in known:
+        detail = f"Неизвестная модель «{provider}». Есть: {', '.join(known)}"
+        raise HTTPException(status_code=422, detail=detail)
+    result = await assistant.suggest(request, provider=provider)
     await repo.save(result, assistant.prepare_request(request))
     return result
 

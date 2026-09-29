@@ -2,6 +2,7 @@
 
 Пример:
     python -m app.cli "Сколько стоит установка?" --history examples/dialog.json --lead examples/lead.json
+    python -m app.cli "Сколько стоит установка?" --provider kimi --verbose
 """
 
 import argparse
@@ -14,9 +15,10 @@ from typing import Any
 
 from pydantic import TypeAdapter, ValidationError
 
-from app.config import get_settings
+from app.config import PROVIDER_IDS, get_settings
 from app.core.assistant import Assistant
-from app.core.llm import LLMError, build_llm_client
+from app.core.llm import LLMError
+from app.core.llm_registry import build_llms
 from app.core.schemas import DialogMessage, LeadContext, SuggestRequest, SuggestResult
 from app.kb.loader import KBValidationError, KnowledgeStore
 from app.logging_setup import configure_logging
@@ -87,7 +89,8 @@ def format_text(result: SuggestResult, verbose: bool) -> str:
         usage = meta.usage
         lines += [
             "",
-            f"LLM: {meta.llm_mode} · модель {meta.model} · попыток {meta.attempts} · {meta.latency_ms} мс",
+            f"LLM: {meta.llm_mode} · {meta.provider or '—'} · модель {meta.model} · "
+            f"попыток {meta.attempts} · {meta.latency_ms} мс",
             f"Токены: вход {usage.input_tokens}, из кэша {usage.cache_read_input_tokens}, "
             f"запись в кэш {usage.cache_creation_input_tokens}, выход {usage.output_tokens}",
             f"Версия БЗ: {meta.kb_version} · id подсказки: {meta.suggestion_id}",
@@ -105,6 +108,11 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--history", type=Path, help="JSON-массив прошлых сообщений {role, text, ts}")
     parser.add_argument("--lead", type=Path, help="JSON с данными сделки")
     parser.add_argument("--channel", help="канал: telegram, whatsapp, site…")
+    parser.add_argument(
+        "--provider",
+        choices=PROVIDER_IDS,
+        help="модель; по умолчанию — LLM_PROVIDER (и запасные из LLM_FALLBACK_PROVIDERS)",
+    )
     parser.add_argument("--json", action="store_true", dest="as_json", help="вывод в JSON")
     parser.add_argument("--verbose", action="store_true", help="показать модель, токены, задержку")
     return parser
@@ -126,9 +134,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Ошибка: {exc}", file=sys.stderr)
         return EXIT_BAD_INPUT
 
-    assistant = Assistant(kb_store, build_llm_client(settings), settings)
+    assistant = Assistant(kb_store, build_llms(settings), settings)
     try:
-        result = asyncio.run(assistant.suggest(request))
+        result = asyncio.run(assistant.suggest(request, provider=args.provider))
     except LLMError as exc:
         print(f"Ошибка LLM: {exc}", file=sys.stderr)
         return EXIT_LLM

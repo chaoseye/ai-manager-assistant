@@ -75,7 +75,8 @@ ROLE_LABELS = {"client": "Клиент", "manager": "Менеджер", "bot": "
 # Теги разметки промпта. В пользовательском тексте их «ломаем», чтобы клиент не мог закрыть
 # <new_message> и дописать свои «инструкции» от имени системы.
 _OWN_TAGS_RE = re.compile(
-    r"<(/?)(knowledge_base|kb_item|tone_of_voice|lead|history|new_message|replies|task)\b", re.IGNORECASE
+    r"<(/?)(knowledge_base|kb_item|tone_of_voice|lead|history|new_message|replies|task|response_format)\b",
+    re.IGNORECASE,
 )
 
 
