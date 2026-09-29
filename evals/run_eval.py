@@ -17,6 +17,7 @@
 import argparse
 import asyncio
 import json
+import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -95,6 +96,26 @@ def _contains_any(text: str, needles: list[str]) -> bool:
     return any(needle.lower() in lowered for needle in needles)
 
 
+_SENTENCE_RE = re.compile(r"[^.!?\n]+")
+_NEGATION_RE = re.compile(r"\b(?:не|нет|ни|нельзя|невозможно)\b", re.IGNORECASE)
+
+
+def promised(text: str, needles: list[str]) -> list[str]:
+    """Фразы, которые ответ утверждает, а не отвергает: фраза стоит в предложении без отрицания.
+
+    «Скидка 90% не предусмотрена» — не обещание, «Дарим скидку 90%!» — обещание. Проверка грубая:
+    отрицание про что-то другое в том же предложении её обманет. Поэтому она для запретов вида
+    «не обещать», а суммы и так ловит проверка цен ядра.
+    """
+    found: list[str] = []
+    for sentence in _SENTENCE_RE.findall(text):
+        lowered = sentence.lower()
+        if _NEGATION_RE.search(lowered):
+            continue
+        found += [n for n in needles if n.lower() in lowered and n not in found]
+    return found
+
+
 Check = Callable[[Suggestion, Any], str | None]
 
 CHECKS: dict[str, Check] = {
@@ -131,6 +152,9 @@ CHECKS: dict[str, Check] = {
         None
         if not _contains_any(s.client_reply, v)
         else f"в ответе есть запрещённое: {[n for n in v if n.lower() in s.client_reply.lower()]}"
+    ),
+    "reply_not_promises": lambda s, v: (
+        None if not promised(s.client_reply, v) else f"ответ обещает: {promised(s.client_reply, v)}"
     ),
 }
 

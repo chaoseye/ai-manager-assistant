@@ -411,3 +411,29 @@ async def test_messages_are_ordered_by_amo_time(env):
     await env.worker.tick()
     assert "<new_message>\nпервое\nвторое\n</new_message>" in env.llm.calls[0].user
     assert to_iso(T0).endswith("+00:00")
+
+
+async def test_concurrent_returning_and_commit_do_not_collide(tmp_path):
+    # Вебхук (upsert диалога с RETURNING) и обработчик (claim_due с RETURNING, commit) работают
+    # на одном соединении. Пока курсор RETURNING не дочитан, чужой commit падал с
+    # «cannot commit transaction - SQL statements in progress» — изредка ронял и тест имитатора.
+    db = Database(tmp_path / "race.db")
+    await db.connect()
+    dialogs, jobs = DialogRepo(db), JobRepo(db)
+    try:
+
+        async def webhook_side():
+            for i in range(150):
+                dialog_id = await dialogs.upsert(incoming(f"m{i}", "Привет", chat=f"chat-{i % 7}"), T0)
+                await jobs.schedule(dialog_id, f"m{i}", T0, T0)
+                await db.commit()
+
+        async def worker_side():
+            for _ in range(150):
+                for job in await jobs.claim_due(T0 + timedelta(seconds=1), limit=5):
+                    await jobs.finish(job.id, "done", T0)
+                await jobs.counts()
+
+        await asyncio.gather(webhook_side(), worker_side())
+    finally:
+        await db.close()

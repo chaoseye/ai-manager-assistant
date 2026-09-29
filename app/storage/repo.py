@@ -68,11 +68,10 @@ class SuggestionRepo:
         return await self._one("SELECT * FROM suggestions WHERE note_id = ?", note_id)
 
     async def _one(self, sql: str, value: object) -> dict[str, Any] | None:
-        cursor = await self._db.conn.execute(sql, (value,))
-        row = await cursor.fetchone()
-        await cursor.close()
-        if row is None:
+        rows = await self._db.conn.execute_fetchall(sql, (value,))
+        if not rows:
             return None
+        row = rows[0]
         return {
             "id": row["id"],
             "dialog_id": row["dialog_id"],
@@ -121,7 +120,7 @@ class DialogRepo:
     async def upsert(self, event: ChatMessageEvent, now: datetime) -> int:
         """Создаёт диалог или дополняет его данными из события. Возвращает id диалога."""
         contact_name = event.author_name if event.direction == "in" else None
-        cursor = await self._db.conn.execute(
+        rows = await self._db.conn.execute_fetchall(
             """
             INSERT INTO dialogs (chat_key, talk_id, contact_id, element_type, element_id, origin,
                                  contact_name, created_at, updated_at)
@@ -148,9 +147,7 @@ class DialogRepo:
                 to_iso(now),
             ),
         )
-        row = await cursor.fetchone()
-        await cursor.close()
-        return int(row[0])
+        return int(rows[0][0])
 
     async def add_message(self, dialog_id: int, event: ChatMessageEvent, now: datetime) -> bool:
         """False, если сообщение с таким id уже есть (повторный вебхук)."""
@@ -183,11 +180,10 @@ class DialogRepo:
         return await self._one("SELECT * FROM dialogs WHERE chat_key = ?", chat_key)
 
     async def _one(self, sql: str, value: object) -> Dialog | None:
-        cursor = await self._db.conn.execute(sql, (value,))
-        row = await cursor.fetchone()
-        await cursor.close()
-        if row is None:
+        rows = await self._db.conn.execute_fetchall(sql, (value,))
+        if not rows:
             return None
+        row = rows[0]
         return Dialog(
             id=row["id"],
             chat_key=row["chat_key"],
@@ -201,7 +197,7 @@ class DialogRepo:
 
     async def messages(self, dialog_id: int, limit: int = 200) -> list[StoredMessage]:
         """Последние limit сообщений по времени amoCRM; при равном времени — в порядке поступления."""
-        cursor = await self._db.conn.execute(
+        rows = await self._db.conn.execute_fetchall(
             """
             SELECT * FROM (
                 SELECT *, rowid AS rid FROM messages WHERE dialog_id = ?
@@ -210,8 +206,6 @@ class DialogRepo:
             """,
             (dialog_id, limit),
         )
-        rows = await cursor.fetchall()
-        await cursor.close()
         return [
             StoredMessage(
                 amo_id=row["amo_id"],
@@ -290,15 +284,14 @@ class JobRepo:
     async def claim_due(self, now: datetime, limit: int) -> list[Job]:
         """Забирает созревшие задачи в работу (pending → running, attempts + 1)."""
         conn = self._db.conn
-        cursor = await conn.execute(
+        rows = await conn.execute_fetchall(
             "SELECT id FROM jobs WHERE status = 'pending' AND run_at <= ? ORDER BY run_at LIMIT ?",
             (to_iso(now), limit),
         )
-        ids = [row["id"] for row in await cursor.fetchall()]
-        await cursor.close()
+        ids = [row["id"] for row in rows]
         claimed: list[Job] = []
         for job_id in ids:
-            cursor = await conn.execute(
+            updated = await conn.execute_fetchall(
                 """
                 UPDATE jobs SET status = 'running', attempts = attempts + 1, updated_at = ?
                 WHERE id = ? AND status = 'pending'
@@ -306,10 +299,7 @@ class JobRepo:
                 """,
                 (to_iso(now), job_id),
             )
-            row = await cursor.fetchone()
-            await cursor.close()
-            if row is not None:
-                claimed.append(_job(row))
+            claimed += [_job(row) for row in updated]
         await conn.commit()
         return claimed
 
@@ -354,31 +344,24 @@ class JobRepo:
 
     async def recover_running(self, now: datetime) -> int:
         """После перезапуска: прерванные задачи снова в очередь (или stale, если есть новая)."""
-        cursor = await self._db.conn.execute("SELECT id FROM jobs WHERE status = 'running'")
-        ids = [row["id"] for row in await cursor.fetchall()]
-        await cursor.close()
+        rows = await self._db.conn.execute_fetchall("SELECT id FROM jobs WHERE status = 'running'")
+        ids = [row["id"] for row in rows]
         for job_id in ids:
             await self.retry_later(job_id, now, "прервана перезапуском сервиса", now)
         return len(ids)
 
     async def latest_for_dialog(self, dialog_id: int) -> Job | None:
-        cursor = await self._db.conn.execute(
+        rows = await self._db.conn.execute_fetchall(
             "SELECT * FROM jobs WHERE dialog_id = ? ORDER BY id DESC LIMIT 1", (dialog_id,)
         )
-        row = await cursor.fetchone()
-        await cursor.close()
-        return _job(row) if row else None
+        return _job(rows[0]) if rows else None
 
     async def get(self, job_id: int) -> Job | None:
-        cursor = await self._db.conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
-        row = await cursor.fetchone()
-        await cursor.close()
-        return _job(row) if row else None
+        rows = await self._db.conn.execute_fetchall("SELECT * FROM jobs WHERE id = ?", (job_id,))
+        return _job(rows[0]) if rows else None
 
     async def counts(self) -> dict[str, int]:
-        cursor = await self._db.conn.execute("SELECT status, COUNT(*) AS n FROM jobs GROUP BY status")
-        rows = await cursor.fetchall()
-        await cursor.close()
+        rows = await self._db.conn.execute_fetchall("SELECT status, COUNT(*) AS n FROM jobs GROUP BY status")
         return {row["status"]: row["n"] for row in rows}
 
 
