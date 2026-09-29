@@ -55,7 +55,7 @@ POST /api/v1/suggest ┘
 | Демо-страница | Jinja2 + vanilla JS, без сборки |
 | Тесты | pytest, pytest-asyncio |
 | Линтер и форматирование | ruff |
-| Запуск | Docker + docker-compose; для вебхуков из живого amoCRM — HTTPS-туннель (ngrok или cloudflared) |
+| Запуск | Docker + docker-compose; для вебхуков из живого amoCRM — HTTPS-туннель (ngrok или cloudflared). Онлайн-демо — Vercel: всё приложение одной функцией, mock-режим |
 | Проверка JWT виджета и Salesbot (этап 3) | PyJWT |
 | Похожесть текстов для автооценки черновиков (этап 3) | rapidfuzz |
 
@@ -127,7 +127,8 @@ Testovoe_O_Complex/
 ├── .env.example
 ├── .gitignore, .dockerignore
 ├── Dockerfile, docker-compose.yml
-├── pyproject.toml               # зависимости, ruff, pytest, команда ai-assistant
+├── vercel.json                  # онлайн-демо: регион, mock-режимы, что не попадает в функцию
+├── pyproject.toml               # зависимости, ruff, pytest, команда ai-assistant, точка входа для Vercel
 └── README.md
 ```
 
