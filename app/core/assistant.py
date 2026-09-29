@@ -29,7 +29,7 @@ class Assistant:
         prepared = request.model_copy(update={"history": list(history)}, deep=True)
         if self.settings.pii_masking:
             prepared.message = mask_pii(prepared.message)
-            for message in prepared.history:
+            for message in [*prepared.history, *prepared.replies]:
                 message.text = mask_pii(message.text)
         return prepared
 

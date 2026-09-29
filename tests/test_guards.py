@@ -151,3 +151,10 @@ def test_upsell_only_mode_clears_reply(kb):
     assert result.client_reply == ""
     assert result.kb_refs == []
     assert warnings == []
+
+
+def test_amount_from_manager_reply_is_allowed(kb):
+    request = SuggestRequest(message="?", replies=[DialogMessage(role="manager", text="Итого 12 345 ₽")])
+    suggestion = make_suggestion(upsell={"pitch": "Как и говорили, 12 345 ₽"})
+    _, warnings = apply_guards(suggestion, kb, request, "upsell_only")
+    assert warnings == []

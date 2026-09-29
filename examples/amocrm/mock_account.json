@@ -1,0 +1,94 @@
+{
+  "account": {"id": 29000001, "name": "Климат-Демо (mock)", "subdomain": "klimat-demo"},
+  "pipelines": [
+    {
+      "id": 7000001,
+      "name": "Продажи",
+      "is_main": true,
+      "statuses": [
+        {"id": 7100000, "name": "Неразобранное"},
+        {"id": 7100001, "name": "Первичный контакт"},
+        {"id": 7100002, "name": "Подбор модели"},
+        {"id": 7100003, "name": "Ожидает оплаты"},
+        {"id": 7100004, "name": "Монтаж назначен"},
+        {"id": 142, "name": "Успешно реализовано"},
+        {"id": 143, "name": "Закрыто и не реализовано"}
+      ]
+    }
+  ],
+  "catalogs": [
+    {
+      "id": 5001,
+      "name": "Товары",
+      "elements": [
+        {"id": 90001, "name": "Сплит-система Basic 07"},
+        {"id": 90002, "name": "Сплит-система Basic 09"},
+        {"id": 90003, "name": "Сплит-система Basic 12"},
+        {"id": 90004, "name": "Инверторная сплит-система Inverter 09"},
+        {"id": 90005, "name": "Инверторная сплит-система Inverter 12"},
+        {"id": 90010, "name": "Стандартный монтаж"},
+        {"id": 90020, "name": "Годовое обслуживание: 2 чистки фильтров и теплообменника"}
+      ]
+    }
+  ],
+  "contacts": [
+    {"id": 3001234, "name": "Анна", "leads": [1234, 1238]},
+    {"id": 3001235, "name": "Дмитрий", "leads": [1235]},
+    {"id": 3001236, "name": "Ирина", "leads": [1236]},
+    {"id": 3001237, "name": "Сергей", "leads": [1237]},
+    {"id": 3001239, "name": "", "leads": [1239]},
+    {"id": 3001101, "name": "Мария", "leads": [1101]},
+    {"id": 3001300, "name": "Олег", "leads": [1300, 1301]},
+    {"id": 3001400, "name": "Елена", "leads": []}
+  ],
+  "leads": [
+    {
+      "id": 1234, "name": "Кондиционер в спальню", "price": 0,
+      "pipeline_id": 7000001, "status_id": 7100001, "updated_at": 1790600000,
+      "contacts": [3001234], "tags": ["telegram"], "catalog_elements": []
+    },
+    {
+      "id": 1235, "name": "Кондиционер 30 м²", "price": 0,
+      "pipeline_id": 7000001, "status_id": 7100001, "updated_at": 1790600100,
+      "contacts": [3001235], "tags": ["whatsapp"], "catalog_elements": []
+    },
+    {
+      "id": 1236, "name": "Basic 09 с монтажом", "price": 42800,
+      "pipeline_id": 7000001, "status_id": 7100004, "updated_at": 1790600200,
+      "contacts": [3001236], "tags": ["telegram"],
+      "catalog_elements": [{"id": 90002, "catalog_id": 5001}, {"id": 90010, "catalog_id": 5001}]
+    },
+    {
+      "id": 1237, "name": "Тихий кондиционер в спальню", "price": 55800,
+      "pipeline_id": 7000001, "status_id": 7100002, "updated_at": 1790600300,
+      "contacts": [3001237], "tags": ["сайт"], "catalog_elements": []
+    },
+    {
+      "id": 1238, "name": "Basic 09 с монтажом", "price": 42800,
+      "pipeline_id": 7000001, "status_id": 7100003, "updated_at": 1790600400,
+      "contacts": [3001234], "tags": ["telegram"],
+      "catalog_elements": [{"id": 90002, "catalog_id": 5001}, {"id": 90010, "catalog_id": 5001}]
+    },
+    {
+      "id": 1239, "name": "Чат на сайте", "price": 0,
+      "pipeline_id": 7000001, "status_id": 7100000, "updated_at": 1790600500,
+      "contacts": [3001239], "tags": ["сайт"], "catalog_elements": []
+    },
+    {
+      "id": 1101, "name": "Basic 09 с монтажом", "price": 42800,
+      "pipeline_id": 7000001, "status_id": 142, "updated_at": 1780000000,
+      "contacts": [3001101], "tags": ["whatsapp"],
+      "catalog_elements": [{"id": 90002, "catalog_id": 5001}, {"id": 90010, "catalog_id": 5001}]
+    },
+    {
+      "id": 1300, "name": "Старая заявка", "price": 0,
+      "pipeline_id": 7000001, "status_id": 143, "updated_at": 1790700000,
+      "contacts": [3001300], "tags": [], "catalog_elements": []
+    },
+    {
+      "id": 1301, "name": "Кондиционер на кухню", "price": 0,
+      "pipeline_id": 7000001, "status_id": 7100002, "updated_at": 1790500000,
+      "contacts": [3001300], "tags": [], "catalog_elements": []
+    }
+  ]
+}

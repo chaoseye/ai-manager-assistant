@@ -13,15 +13,24 @@ router = APIRouter(tags=["health"])
 async def health(request: Request) -> dict[str, Any]:
     state = request.app.state
     llm = state.assistant.llm
-    llm_problem = getattr(llm, "problem", None)
+    problems: dict[str, str] = {}
+    if getattr(llm, "problem", None):
+        problems["llm_problem"] = llm.problem
+    if getattr(state, "amocrm_problem", None):
+        problems["amocrm_problem"] = state.amocrm_problem
+
     body: dict[str, Any] = {
-        "status": "degraded" if llm_problem else "ok",
+        "status": "degraded" if problems else "ok",
         "version": __version__,
         "kb_version": state.kb_store.current.version,
         "llm_mode": llm.mode,
         "llm_model": llm.model,
         "amocrm": state.settings.amocrm_mode,
+        **problems,
     }
-    if llm_problem:
-        body["llm_problem"] = llm_problem
+    jobs = getattr(state, "jobs", None)
+    if jobs is not None:
+        worker = state.worker
+        body["queue"] = await jobs.counts()
+        body["worker"] = "running" if worker is not None and worker.running else "stopped"
     return body

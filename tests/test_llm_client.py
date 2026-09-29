@@ -8,13 +8,13 @@ import pytest
 
 from app.core.llm import (
     FALLBACK_BETA,
-    SUGGESTION_SCHEMA,
     AnthropicLLMClient,
     LLMBadOutputError,
     LLMCall,
     LLMRefusedError,
     LLMTruncatedError,
     LLMUnavailableError,
+    suggestion_schema,
 )
 from app.core.schemas import SuggestRequest
 from tests.conftest import make_settings, make_suggestion
@@ -81,7 +81,7 @@ async def test_request_params(kb, tmp_path):
     assert params["system"] == [{"type": "text", "text": "SYSTEM", "cache_control": {"type": "ephemeral"}}]
     assert params["messages"] == [{"role": "user", "content": "USER"}]
     assert params["output_config"]["effort"] == "low"
-    assert params["output_config"]["format"] == {"type": "json_schema", "schema": SUGGESTION_SCHEMA}
+    assert params["output_config"]["format"] == {"type": "json_schema", "schema": suggestion_schema()}
     assert params["betas"] == [FALLBACK_BETA]
     assert params["fallbacks"] == "default"
     assert "thinking" not in params  # у Opus 5.5 рассуждения адаптивные по умолчанию
@@ -96,8 +96,9 @@ async def test_fallbacks_can_be_disabled(kb, tmp_path):
 
 
 def test_schema_is_strict():
-    assert SUGGESTION_SCHEMA["additionalProperties"] is False
-    assert set(SUGGESTION_SCHEMA["required"]) >= {"client_reply", "upsell", "kb_refs", "needs_human"}
+    schema = suggestion_schema()
+    assert schema["additionalProperties"] is False
+    assert set(schema["required"]) >= {"client_reply", "upsell", "kb_refs", "needs_human"}
 
 
 async def test_parses_response_and_usage(kb, tmp_path):

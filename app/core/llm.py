@@ -1,11 +1,14 @@
-"""Клиент LLM: интерфейс и реализация на официальном SDK Anthropic."""
+"""Клиент LLM: интерфейс и реализация на официальном SDK Anthropic.
+
+SDK импортируется лениво, при создании клиента для LLM_MODE=live: он тяжёлый (секунды на импорт),
+а CLI, имитатор amoCRM и тесты в mock-режиме без него обходятся.
+"""
 
 import logging
 from dataclasses import dataclass, replace
+from functools import lru_cache
 from typing import Any, Protocol
 
-import anthropic
-from anthropic import transform_schema
 from pydantic import ValidationError
 
 from app.config import Settings
@@ -18,7 +21,13 @@ logger = logging.getLogger(__name__)
 # на рекомендованной модели. Заголовок относится именно к форме fallbacks="default".
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
-SUGGESTION_SCHEMA: dict[str, Any] = transform_schema(Suggestion)
+
+@lru_cache(maxsize=1)
+def suggestion_schema() -> dict[str, Any]:
+    """JSON-схема ответа модели, приведённая SDK к требованиям structured outputs."""
+    from anthropic import transform_schema
+
+    return transform_schema(Suggestion)
 
 
 class LLMError(Exception):
@@ -92,6 +101,8 @@ class AnthropicLLMClient:
         self._settings = settings
         self.model = settings.llm_model
         if client is None:
+            import anthropic
+
             kwargs: dict[str, Any] = {"timeout": settings.llm_timeout_seconds, "max_retries": 2}
             if settings.anthropic_api_key:
                 kwargs["api_key"] = settings.anthropic_api_key
@@ -114,7 +125,7 @@ class AnthropicLLMClient:
             "messages": [{"role": "user", "content": call.user}],
             "output_config": {
                 "effort": self._settings.llm_effort,
-                "format": {"type": "json_schema", "schema": SUGGESTION_SCHEMA},
+                "format": {"type": "json_schema", "schema": suggestion_schema()},
             },
         }
         if self._settings.llm_fallbacks:
@@ -123,6 +134,8 @@ class AnthropicLLMClient:
         return params
 
     async def generate(self, call: LLMCall) -> LLMResponse:
+        import anthropic
+
         if self.problem:
             raise LLMUnavailableError(self.problem)
         params = self.build_params(call)

@@ -2,12 +2,12 @@
 
 import pytest
 
-from app.api.demo import load_scenarios
 from app.config import BASE_DIR
 from app.core.assistant import Assistant
 from app.core.guards import apply_guards
 from app.core.mock_llm import MockLLMClient, faq_fallback, load_recordings, normalize
 from app.core.schemas import LeadContext, SuggestRequest
+from app.scenarios import load_scenarios
 from tests.conftest import make_settings
 
 SCENARIOS = load_scenarios(BASE_DIR / "examples" / "scenarios")
@@ -92,3 +92,18 @@ def test_faq_fallback_does_not_match_long_unrelated_message(kb):
     suggestion = faq_fallback("Кондиционер после установки гудит и вибрирует, спать невозможно.", kb, None)
     assert suggestion.kb_refs == []
     assert suggestion.needs_human is True
+
+
+def test_faq_fallback_does_not_answer_price_with_duration(kb):
+    # «сколько» и «монтаж» совпадают с «сколько длится монтаж», но вопрос о цене — лучше честное «уточню».
+    suggestion = faq_fallback("Сколько стоит монтаж?", kb, None)
+    assert suggestion.kb_refs == [] and suggestion.needs_human is True
+
+
+def test_light_modules_do_not_import_model_sdk():
+    import subprocess
+    import sys
+
+    code = "import sys, app.amocrm.simulate, app.cli; print('anthropic' in sys.modules)"
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    assert result.stdout.strip() == "False"

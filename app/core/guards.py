@@ -106,7 +106,7 @@ def is_amount_allowed(
 
 
 def _conversation_amounts(request: SuggestRequest) -> set[int]:
-    texts = [request.message] + [m.text for m in request.history]
+    texts = [request.message] + [m.text for m in (*request.history, *request.replies)]
     return {round(value) for text in texts for _, value in extract_amounts(text)}
 
 

@@ -52,3 +52,15 @@ def test_client_cannot_close_prompt_tags():
     prompt = build_user_prompt(SuggestRequest(message=text), mode="full")
     assert prompt.count("</new_message>") == 1
     assert prompt.count("<task>") == 1
+
+
+def test_replies_block_is_rendered_only_when_present():
+    request = SuggestRequest(
+        message="Сколько стоит монтаж?",
+        replies=[DialogMessage(role="manager", text="Монтаж — 9 900 ₽", author_name="Ольга")],
+    )
+    prompt = build_user_prompt(request, mode="upsell_only")
+    assert "<replies>" in prompt and "Менеджер (Ольга): Монтаж — 9 900 ₽" in prompt
+    assert prompt.index("</new_message>") < prompt.index("<replies>") < prompt.index("<task>")
+    assert "<replies>" not in build_user_prompt(SuggestRequest(message="?"), mode="full")
+    assert "<replies>" not in neutralize_tags("<replies>")

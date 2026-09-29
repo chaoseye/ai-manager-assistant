@@ -112,3 +112,12 @@ async def test_upsell_only_mode_accepts_empty_reply(kb_store, tmp_path):
     assert result.meta.mode == "upsell_only"
     assert result.meta.attempts == 1
     assert "черновик ответа не нужен" in llm.calls[0].user
+
+
+async def test_replies_are_masked(kb_store, tmp_path):
+    llm = FakeLLM(make_suggestion(client_reply="", kb_refs=[]))
+    request = SuggestRequest(
+        message="Сколько стоит?", replies=[DialogMessage(role="manager", text="Звоните +7 916 123-45-67")]
+    )
+    await make_assistant(kb_store, tmp_path, llm).suggest(request, mode="upsell_only")
+    assert "[PHONE]" in llm.calls[0].user and "916" not in llm.calls[0].user

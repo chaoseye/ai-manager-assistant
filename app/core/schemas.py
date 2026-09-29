@@ -37,6 +37,11 @@ class LeadContext(BaseModel):
 class SuggestRequest(BaseModel):
     message: str = Field(max_length=10_000, description="Новое обращение клиента")
     history: list[DialogMessage] = Field(default_factory=list, max_length=500)
+    replies: list[DialogMessage] = Field(
+        default_factory=list,
+        max_length=50,
+        description="Реплики менеджера или бота, отправленные уже после нового обращения",
+    )
     lead: LeadContext | None = None
     channel: str | None = Field(default=None, max_length=50)
 

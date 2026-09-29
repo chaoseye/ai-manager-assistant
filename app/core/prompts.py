@@ -64,17 +64,18 @@ TASK_FULL = (
     "и подсказку по допродаже для менеджера."
 )
 TASK_UPSELL_ONLY = (
-    "Менеджер уже ответил клиенту сам, черновик ответа не нужен: верни client_reply пустой строкой, "
-    "kb_refs — пустым списком. Подготовь только подсказку по допродаже с учётом всей переписки, "
-    "включая ответ менеджера."
+    "Менеджер уже ответил клиенту сам (см. <replies>), черновик ответа не нужен: верни client_reply "
+    "пустой строкой, kb_refs — пустым списком. Подготовь только подсказку по допродаже с учётом всей "
+    "переписки, включая ответ менеджера."
 )
+REPLIES_NOTE = "Реплики, отправленные уже после сообщения из <new_message>. Не повторяй их в ответе клиенту."
 
 ROLE_LABELS = {"client": "Клиент", "manager": "Менеджер", "bot": "Бот"}
 
 # Теги разметки промпта. В пользовательском тексте их «ломаем», чтобы клиент не мог закрыть
 # <new_message> и дописать свои «инструкции» от имени системы.
 _OWN_TAGS_RE = re.compile(
-    r"<(/?)(knowledge_base|kb_item|tone_of_voice|lead|history|new_message|task)\b", re.IGNORECASE
+    r"<(/?)(knowledge_base|kb_item|tone_of_voice|lead|history|new_message|replies|task)\b", re.IGNORECASE
 )
 
 
@@ -120,9 +121,14 @@ def _render_message(message: DialogMessage) -> str:
 def build_user_prompt(request: SuggestRequest, *, mode: Mode) -> str:
     history = "\n".join(_render_message(m) for m in request.history) or "(переписки до этого не было)"
     task = TASK_FULL if mode == "full" else TASK_UPSELL_ONLY
+    replies = ""
+    if request.replies:
+        rendered = "\n".join(_render_message(m) for m in request.replies)
+        replies = f"<replies>\n{REPLIES_NOTE}\n{rendered}\n</replies>\n\n"
     return (
         f"<lead>\n{_render_lead(request.lead, request.channel)}\n</lead>\n\n"
         f"<history>\n{history}\n</history>\n\n"
         f"<new_message>\n{neutralize_tags(request.message)}\n</new_message>\n\n"
+        f"{replies}"
         f"<task>\n{task}\n</task>"
     )
