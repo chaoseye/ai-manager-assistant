@@ -78,6 +78,8 @@ async def send_message(message: MockMessage, request: Request) -> dict[str, Any]
 async def feed(request: Request, lead_id: int, chat_id: str, after_note_id: int = 0) -> dict[str, Any]:
     fake = _fake(request)
     state = request.app.state
+    if state.settings.worker_on_request and state.worker is not None:
+        await state.worker.tick()  # без фонового цикла очередь продвигается опросом ленты
     items: list[dict[str, Any]] = []
     queue: dict[str, Any] | None = None
     now = datetime.now(UTC)

@@ -30,6 +30,10 @@ dev = [
 [project.scripts]
 ai-assistant = "app.cli:main"
 
+# Vercel: FastAPI-приложение как одна функция (см. vercel.json и README, раздел про Vercel).
+[tool.vercel]
+entrypoint = "app.main:app"
+
 [tool.setuptools.packages.find]
 include = ["app*", "evals*"]
 

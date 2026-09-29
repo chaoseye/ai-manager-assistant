@@ -1,5 +1,6 @@
 """Настройки приложения из переменных окружения и файла .env."""
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -8,6 +9,10 @@ from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# На Vercel (системная переменная VERCEL=1) файловая система доступна на запись только в /tmp,
+# а экземпляр функции «засыпает» между запросами — фоновый цикл обработчика там ненадёжен.
+ON_VERCEL = bool(os.environ.get("VERCEL"))
 
 Effort = Literal["low", "medium", "high", "xhigh", "max"]
 
@@ -43,7 +48,7 @@ class Settings(BaseSettings):
     admin_token: str | None = None
 
     # Хранилище и логи
-    db_path: Path = Path("data/app.db")
+    db_path: Path = Path("/tmp/ai-manager/app.db") if ON_VERCEL else Path("data/app.db")
     log_level: str = "INFO"
     log_texts: bool = False
 
@@ -60,7 +65,10 @@ class Settings(BaseSettings):
     note_service_name: str = "AI-помощник"
 
     # Очередь генераций (этап 2)
-    worker_enabled: bool = True
+    worker_enabled: bool = not ON_VERCEL  # фоновый цикл обработчика
+    # Обрабатывать созревшие задачи, когда страница «amoCRM (mock)» запрашивает ленту.
+    # Нужно там, где фоновый цикл не работает (Vercel).
+    worker_on_request: bool = ON_VERCEL
     worker_concurrency: int = 3
     worker_poll_seconds: float = 0.5
     debounce_seconds: float = 6.0

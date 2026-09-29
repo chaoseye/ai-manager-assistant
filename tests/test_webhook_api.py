@@ -257,3 +257,37 @@ def test_amocrm_page(mock_client, client):
     assert "AMOCRM_MODE=off" in off.text and "amocrm.js" not in off.text
     index = client.get("/")
     assert 'href="/" class="nav-link active"' in index.text and "amoCRM: off" in index.text
+
+
+def test_on_request_mode_processes_queue_when_feed_is_polled(tmp_path):
+    # Так сервис работает на Vercel: фонового цикла нет, очередь двигает опрос ленты.
+    settings = mock_settings(tmp_path, worker_enabled=False, worker_on_request=True)
+    with TestClient(create_app(settings, llm=FakeLLM(make_suggestion()))) as client:
+        client.post(
+            "/api/v1/amocrm-mock/messages",
+            json={"lead_id": 1234, "chat_id": "web-1234-v", "text": "Сколько стоит монтаж?"},
+        )
+        feed = client.get(
+            "/api/v1/amocrm-mock/feed", params={"lead_id": 1234, "chat_id": "web-1234-v"}
+        ).json()
+        assert [i["kind"] for i in feed["items"]] == ["message", "note"]
+        assert feed["queue"]["status"] == "done"
+        assert client.get("/health").json()["worker"] == "on_request"
+
+
+def test_vercel_defaults(monkeypatch):
+    import importlib
+
+    import app.config as config_module
+
+    monkeypatch.setenv("VERCEL", "1")
+    try:
+        reloaded = importlib.reload(config_module)
+        settings = reloaded.Settings(_env_file=None)
+        # На Linux (Vercel) это /tmp/ai-manager/app.db; на Windows путь без диска получает букву диска.
+        assert settings.db_path.as_posix().endswith("/tmp/ai-manager/app.db")
+        assert settings.worker_enabled is False
+        assert settings.worker_on_request is True
+    finally:
+        monkeypatch.delenv("VERCEL")
+        importlib.reload(config_module)

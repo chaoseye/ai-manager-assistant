@@ -32,5 +32,8 @@ async def health(request: Request) -> dict[str, Any]:
     if jobs is not None:
         worker = state.worker
         body["queue"] = await jobs.counts()
-        body["worker"] = "running" if worker is not None and worker.running else "stopped"
+        if worker is not None and worker.running:
+            body["worker"] = "running"
+        else:
+            body["worker"] = "on_request" if state.settings.worker_on_request else "stopped"
     return body
