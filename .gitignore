@@ -8,3 +8,7 @@ dist/
 .ruff_cache/
 .env
 data/
+
+# Локальные настройки ассистента и среды разработки
+/CLAUDE.md
+/.claude/

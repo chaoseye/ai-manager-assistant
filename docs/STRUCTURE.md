@@ -126,7 +126,6 @@ Testovoe_O_Complex/
 ├── .gitignore, .dockerignore
 ├── Dockerfile, docker-compose.yml
 ├── pyproject.toml               # зависимости, ruff, pytest, команда ai-assistant
-├── CLAUDE.md
 └── README.md
 ```
 
