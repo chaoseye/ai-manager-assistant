@@ -151,3 +151,15 @@ def test_health_is_degraded_without_llm_credentials(tmp_path):
         body = client.get("/health").json()
     assert body["status"] == "degraded"
     assert "учётные данные" in body["llm_problem"]
+
+
+def test_static_urls_carry_content_version(client):
+    from app.api.demo import STATIC_VERSION
+
+    # Адрес меняется с правкой CSS/JS — после деплоя браузер не возьмёт старый скрипт из кэша.
+    assert len(STATIC_VERSION) == 10
+    for path, asset in (("/", "app.js"), ("/amocrm", "common.js")):  # amoCRM в этой фикстуре выключен
+        page = client.get(path).text
+        assert f"/static/{asset}?v={STATIC_VERSION}" in page
+        assert f"/static/styles.css?v={STATIC_VERSION}" in page
+    assert client.get(f"/static/app.js?v={STATIC_VERSION}").status_code == 200

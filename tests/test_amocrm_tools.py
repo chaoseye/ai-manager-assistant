@@ -4,6 +4,8 @@
 поддельный amoCRM и mock-LLM с записанными ответами — полный путь без сети и ключей.
 """
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -45,9 +47,11 @@ def test_scenario_end_to_end(service, capsys):
     assert "→ Клиент: Добрый день, нужен кондиционер в спальню" in out
     assert "→ Менеджер (Ольга): Здравствуйте, Анна!" in out
     assert "=== Примечание в сделке #1234 · AI-помощник ===" in out
-    assert (
-        "Черновик ответа клиенту:\nАнна, для комнаты 20 м² подойдёт сплит-система Basic 09 — 32 900 ₽" in out
+    # Ожидаемый черновик — из записанного ответа: его можно перезаписать другой моделью.
+    recording = json.loads(
+        (BASE_DIR / "examples" / "mock_llm" / "01-price-install.json").read_text(encoding="utf-8")
     )
+    assert f"Черновик ответа клиенту:\n{recording['suggestion']['client_reply']}" in out
     assert "Допродажа (только для менеджера) · предложить сейчас" in out
 
 

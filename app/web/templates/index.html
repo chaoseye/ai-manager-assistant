@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AI-помощник менеджера</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}?v={{ static_version }}">
 </head>
 <body>
 {% include "_header.html" %}
@@ -137,7 +137,7 @@
 </main>
 
 <div id="toast" class="toast" role="status" hidden></div>
-<script src="{{ url_for('static', path='common.js') }}" defer></script>
-<script src="{{ url_for('static', path='app.js') }}" defer></script>
+<script src="{{ url_for('static', path='common.js') }}?v={{ static_version }}" defer></script>
+<script src="{{ url_for('static', path='app.js') }}?v={{ static_version }}" defer></script>
 </body>
 </html>

@@ -27,6 +27,8 @@ _STOP_WORDS = {"как", "что", "или", "для", "это", "вас", "на
 class Recording(BaseModel):
     id: str
     match: str
+    model: str | None = None  # какая модель дала ответ; None — ответ составлен вручную
+    recorded_at: str | None = None
     suggestion: Suggestion
 
 
@@ -117,9 +119,12 @@ class MockLLMClient:
 
     async def generate(self, call: LLMCall) -> LLMResponse:
         recording = self._recordings.get(normalize(call.request.message))
+        model = self.model
         if recording is not None:
             suggestion = recording.suggestion.model_copy(deep=True)
+            if recording.model:
+                model = f"{recording.model} (запись)"  # в «Технических данных» видно, чей это ответ
         else:
             name = call.request.lead.contact_name if call.request.lead else None
             suggestion = faq_fallback(call.request.message, call.kb, name)
-        return LLMResponse(suggestion=suggestion, model=self.model, usage=Usage())
+        return LLMResponse(suggestion=suggestion, model=model, usage=Usage())

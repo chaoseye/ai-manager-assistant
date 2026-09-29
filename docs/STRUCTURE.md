@@ -124,7 +124,7 @@ Testovoe_O_Complex/
 ├── examples/
 │   ├── dialog.json, lead.json   # вход для CLI
 │   ├── scenarios/               # 8 готовых сценариев: демо-страницы и имитатор amoCRM
-│   ├── mock_llm/                # ответы для mock-режима LLM (составлены вручную, см. README там)
+│   ├── mock_llm/                # ответы для mock-режима: 6 — записанные ответы Grok 4.7, 2 — вручную (README там)
 │   └── amocrm/mock_account.json # «аккаунт» поддельного amoCRM: воронка, сделки, контакты, каталог
 ├── tests/                       # раздел 12
 ├── evals/                       # раздел 12
@@ -134,6 +134,7 @@ Testovoe_O_Complex/
 ├── .env.example
 ├── .gitignore, .dockerignore
 ├── Dockerfile, docker-compose.yml
+├── .github/workflows/ci.yml     # GitHub Actions: ruff и pytest (Python 3.11, 3.12), сборка и запуск образа
 ├── vercel.json                  # онлайн-демо: регион, mock-режимы, что не попадает в функцию
 ├── pyproject.toml               # зависимости, ruff, pytest, команда ai-assistant, точка входа для Vercel
 └── README.md
@@ -484,6 +485,7 @@ tests/
 ├── test_gateway_llm.py            # клиент шлюза на поддельном HTTP: запрос по моделям, разбор, упрощение, ошибки
 ├── test_llm_registry.py           # реестр, маршруты, запасные модели, ?provider=, /api/v1/llm/providers, выбор на странице
 ├── test_setup_gateway.py          # команда подключения шлюза: .env, проверка ключа, подсказки по моделям
+├── test_record_scenarios.py       # запись ответов на сценарии: запрос как на странице, отбор по проверкам
 ├── test_mock_llm_and_scenarios.py # ответы mock проходят проверки, сценарии end-to-end, FAQ, лёгкие импорты
 ├── test_api.py                    # эндпоинты, токены, коды ошибок, сохранение, перезагрузка БЗ
 ├── test_cli.py                    # текстовый и JSON-вывод, stdin, коды возврата, --provider
@@ -496,6 +498,7 @@ tests/
 evals/
 ├── cases.yaml                     # 31 кейс: вход + ожидаемые свойства результата
 ├── run_eval.py                    # прогон, проверки, метрики, стоимость, отчёт, --provider (all — сравнение), --record
+├── record_scenarios.py            # ответы модели на демо-сценарии → examples/mock_llm (только прошедшие проверки)
 └── reports/                       # отчёты прогонов в Markdown
 ```
 

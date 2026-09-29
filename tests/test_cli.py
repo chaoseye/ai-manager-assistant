@@ -31,10 +31,16 @@ def test_text_output(capsys):
     )
     out = capsys.readouterr().out
     assert code == 0
+    # Ожидаемое берём из записанного ответа: его можно перезаписать другой моделью (evals.record_scenarios).
+    recording = json.loads(
+        (BASE_DIR / "examples" / "mock_llm" / "01-price-install.json").read_text(encoding="utf-8")
+    )
+    suggestion = recording["suggestion"]
     assert "=== Ответ клиенту ===" in out
+    assert suggestion["client_reply"] in out
     assert "32 900 ₽" in out
     assert "=== Допродажа (только для менеджера) · сейчас ===" in out
-    assert "service-1y" in out
+    assert ", ".join(suggestion["upsell"]["product_ids"]) in out
     assert "LLM: mock" in out
 
 

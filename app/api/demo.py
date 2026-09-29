@@ -1,5 +1,6 @@
 """Демо-страница «диалоговое окно» и её готовые сценарии."""
 
+import hashlib
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request
@@ -10,7 +11,22 @@ from app.api.deps import get_settings_dep
 from app.config import Settings
 from app.scenarios import Scenario, load_scenarios
 
-TEMPLATES = Jinja2Templates(directory=Path(__file__).resolve().parent.parent / "web" / "templates")
+WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+TEMPLATES = Jinja2Templates(directory=WEB_DIR / "templates")
+
+
+def _static_version() -> str:
+    """Хэш содержимого CSS и JS: адреса статики меняются с каждой их правкой, и после деплоя браузер
+    не возьмёт из кэша старый скрипт к новой странице."""
+    digest = hashlib.sha256()
+    for path in sorted((WEB_DIR / "static").rglob("*")):
+        if path.is_file():
+            digest.update(path.name.encode())
+            digest.update(path.read_bytes())
+    return digest.hexdigest()[:10]
+
+
+STATIC_VERSION = _static_version()
 
 router = APIRouter(tags=["demo"])
 
@@ -32,6 +48,7 @@ def _page_context(request: Request, active: str) -> dict[str, object]:
         "kb_version": state.kb_store.current.version,
         "amocrm_mode": state.settings.amocrm_mode,
         "debounce_seconds": state.settings.debounce_seconds,
+        "static_version": STATIC_VERSION,
     }
 
 

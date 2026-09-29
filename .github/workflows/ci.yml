@@ -1,0 +1,60 @@
+# Проверки на каждый push в main и pull request:
+# - линтер и тесты (без сети и ключей: модели и amoCRM подменены);
+# - сборка Docker-образа через docker compose и запуск контейнера в mock-режиме.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Линтер и тесты (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: Зависимости
+        run: pip install -e ".[dev]"
+      - name: ruff
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: pytest
+        run: pytest -q
+
+  docker:
+    name: Docker-образ
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Сборка и запуск (docker compose, без .env — mock-режим)
+        run: docker compose up -d --build
+      - name: Сервис отвечает
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/health > /dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8000/health | tee /dev/stderr | grep -q '"status":"ok"'
+          curl -fsS -X POST http://127.0.0.1:8000/api/v1/suggest \
+            -H 'Content-Type: application/json' \
+            -d '{"message": "Сколько длится монтаж?"}' | tee /dev/stderr | grep -q '"client_reply"'
+          curl -fsS -o /dev/null http://127.0.0.1:8000/
+      - name: Логи контейнера при сбое
+        if: failure()
+        run: docker compose logs
+      - name: Остановка
+        if: always()
+        run: docker compose down

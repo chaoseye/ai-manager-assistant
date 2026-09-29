@@ -248,7 +248,9 @@ function renderSuggestion({ suggestion: s, meta }) {
   const metaList = $("meta");
   metaList.replaceChildren();
   const usage = meta.usage;
-  addKv(metaList, "Модель", meta.provider ? `${meta.model} (${meta.provider}, ${meta.llm_mode})` : `${meta.model} (${meta.llm_mode})`);
+  // В mock-режиме провайдер ничего не значит: отвечает запись или FAQ, а не выбранная модель.
+  const showProvider = meta.provider && meta.llm_mode !== "mock";
+  addKv(metaList, "Модель", showProvider ? `${meta.model} (${meta.provider}, ${meta.llm_mode})` : `${meta.model} (${meta.llm_mode})`);
   addKv(metaList, "Тема / настроение", `${INTENT[s.intent] || s.intent} / ${SENTIMENT[s.sentiment] || s.sentiment}`);
   addKv(metaList, "Задержка", `${meta.latency_ms} мс, попыток: ${meta.attempts}`);
   addKv(metaList, "Токены", `вход ${usage.input_tokens}, кэш ${usage.cache_read_input_tokens}, выход ${usage.output_tokens}`);
