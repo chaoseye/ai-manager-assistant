@@ -53,6 +53,7 @@ PRICES_PER_MTOK: dict[str, dict[str, float]] = {
     "kimi-k3": {"input": 3.00, "output": 15.00, "cache_read": 0.30, "cache_write": 0.0},
     "qwen3.8-max": {"input": 2.00, "output": 6.00, "cache_read": 0.25, "cache_write": 2.50},
     "qwen3.8-max-0902": {"input": 2.00, "output": 6.00, "cache_read": 0.25, "cache_write": 2.50},
+    "qwen3.8-2.4t-a95b": {"input": 2.00, "output": 6.00, "cache_read": 0.25, "cache_write": 0.0},
     "grok-4.7": {"input": 2.00, "output": 6.00, "cache_read": 0.50, "cache_write": 0.0},
 }
 PRICE_WARNING_CODES = {"price_not_in_kb", "upsell_price_not_in_kb"}
@@ -253,7 +254,13 @@ def summarize(results: list[CaseResult], configured_model: str | None = None) ->
         total=len(results),
         passed=sum(r.passed for r in results),
         errors=sum(r.error is not None for r in results),
-        price_warnings=sum(1 for r in done for w in r.result.meta.warnings if w.code in PRICE_WARNING_CODES),
+        # Только недопустимые суммы: в кейсах с allow_warnings сумма вне БЗ ожидаема и ошибкой не считается.
+        price_warnings=sum(
+            1
+            for r in done
+            for w in r.result.meta.warnings
+            if w.code in PRICE_WARNING_CODES and w.code not in r.case.allow_warnings
+        ),
         out_of_kb=_ratio(results, "out_of_kb", lambda r: r.result.suggestion.needs_human),
         complaints=_ratio(results, "complaint", lambda r: r.result.suggestion.upsell.timing == "not_now"),
         injection=_ratio(results, "injection", lambda r: r.passed),

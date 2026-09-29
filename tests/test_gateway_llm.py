@@ -404,3 +404,22 @@ async def test_invalid_url_is_reported(kb, tmp_path):
     client = make_client(tmp_path, llm_gateway_url="https://<новый-адрес>.trycloudflare.com/v1")
     with pytest.raises(LLMUnavailableError, match="Некорректный LLM_GATEWAY_URL"):
         await client.generate(make_call(kb))
+
+
+DENIED = "Access denied, please make sure your account is in good standing."
+
+
+async def test_access_denied_only_for_some_params(kb, tmp_path):
+    # Так вёл себя Qwen за шлюзом заказчика: с response_format — отказ, без него — ответ.
+    gateway = FakeGateway(error(400, DENIED), error(400, DENIED), error(400, DENIED), completion(GOOD))
+    client = make_client(tmp_path, "qwen", gateway=gateway)
+    response = await client.generate(make_call(kb))
+    assert response.suggestion == make_suggestion()
+    assert "response_format" not in gateway.bodies[-1]
+
+
+async def test_access_denied_everywhere(kb, tmp_path):
+    gateway = FakeGateway(error(400, DENIED))
+    with pytest.raises(LLMUnavailableError, match="отказал шлюзу в доступе"):
+        await make_client(tmp_path, "qwen", gateway=gateway).generate(make_call(kb))
+    assert len(gateway.requests) == 4  # все варианты запроса; отказы приходят сразу и бесплатны

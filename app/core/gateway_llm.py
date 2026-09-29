@@ -46,6 +46,14 @@ _PARAM_ERROR_RE = re.compile(
     r"response_format|json_schema|json_object|reasoning_effort|enable_thinking", re.IGNORECASE
 )
 _BARE_NOT_FOUND = frozenset({"not found", "404 not found", "404 page not found"})
+# Отказ провайдера в доступе (Alibaba: «Access denied, please make sure your account is in good standing»).
+# Варианты запроса при нём всё равно перебираем: отказ бывает только для части параметров
+# (так было с Qwen: с response_format — отказ, без него — ответ), а отказ приходит сразу и бесплатно.
+_ACCESS_ERROR_RE = re.compile(
+    r"access denied|good standing|arrearage|overdue|insufficient[_ ]quota"
+    r"|account (?:is )?(?:suspended|disabled)",
+    re.IGNORECASE,
+)
 _HTML_TITLE_RE = re.compile(r"<title>\s*(.*?)\s*</title>", re.S | re.I)
 # Cloudflare: 530 и 1033 — туннель не подключён, 502 — туннель есть, а шлюз за ним не отвечает.
 TUNNEL_DOWN_STATUSES = frozenset({530})
@@ -305,6 +313,11 @@ class GatewayLLMClient:
                 break
             except _ParamsRejected as exc:
                 if level + 1 >= len(self._levels):
+                    if _ACCESS_ERROR_RE.search(str(exc)):
+                        raise LLMUnavailableError(
+                            f"Провайдер модели {self.model} отказал шлюзу в доступе ({exc}). "
+                            "Проверьте канал этой модели в шлюзе"
+                        ) from exc
                     raise LLMUnavailableError(f"Шлюз не принял запрос к модели {self.model}: {exc}") from exc
                 level += 1
                 response_format, with_options = self._levels[level]

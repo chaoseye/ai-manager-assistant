@@ -54,6 +54,7 @@ def test_cost():
 
 def test_mock_run_writes_report(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("LLM_MODE", "mock")
+    monkeypatch.setenv("LLM_PROVIDER", "claude")  # не зависим от LLM_PROVIDER в локальном .env
     from app.config import get_settings
 
     get_settings.cache_clear()
@@ -158,3 +159,30 @@ def test_stops_when_gateway_is_down(monkeypatch, capsys):
     finally:
         get_settings.cache_clear()
     assert "шлюз LLM недоступен" in capsys.readouterr().err
+
+
+def test_allowed_price_warnings_are_not_counted():
+    from datetime import UTC, datetime
+
+    from app.core.schemas import GuardWarning, Meta, SuggestResult
+    from evals.run_eval import CaseResult, summarize
+
+    warning = GuardWarning(code="price_not_in_kb", message="Сумма «1 500 ₽» не выводится из базы знаний")
+    meta = Meta(
+        suggestion_id="x",
+        mode="full",
+        llm_mode="live",
+        provider="glm",
+        model="glm-5.3",
+        kb_version="v",
+        latency_ms=1,
+        attempts=1,
+        usage=Usage(),
+        warnings=[warning],
+        created_at=datetime.now(UTC),
+    )
+    result = SuggestResult(suggestion=make_suggestion(), meta=meta)
+    allowed = CaseResult(case=Case(id="a", message="?", allow_warnings=["price_not_in_kb"]), result=result)
+    forbidden = CaseResult(case=Case(id="b", message="?"), result=result)
+    assert summarize([allowed]).price_warnings == 0
+    assert summarize([allowed, forbidden]).price_warnings == 1
