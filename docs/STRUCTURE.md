@@ -424,11 +424,11 @@ id всех записей — латиница в kebab-case, уникальн�
 | `SCENARIOS_DIR` | `examples/scenarios` | Сценарии демо-страницы и имитатора |
 | `API_TOKEN` | — | Если задан, `/api/v1/suggest*` требует `Authorization: Bearer` |
 | `ADMIN_TOKEN` | — | Если задан, `/api/v1/kb*` требует `Authorization: Bearer`; пусто — открыто (локальная разработка) |
-| `DB_PATH` | `data/app.db` | Файл SQLite |
+| `DB_PATH` | `data/app.db` (на Vercel — `/tmp/ai-manager/app.db`) | Файл SQLite |
 | `LOG_LEVEL` | `INFO` | Уровень логов |
 | `LOG_TEXTS` | `false` | Писать ли тексты сообщений и ответов в логи |
 | `AMOCRM_MODE` | `off` | `off` / `mock` / `live`; в `.env.example` для демо — `mock` |
-| `WEBHOOK_SECRET` | — | Секрет в пути вебхука; обязателен при `mock` и `live`. В `.env.example` — `dev-secret`, только для демо |
+| `WEBHOOK_SECRET` | — | Секрет в пути вебхука; обязателен при `live`. В `mock` без него вебхук выключен, а страница «amoCRM (mock)» работает. В `.env.example` — `dev-secret`, только для демо |
 | `AMOCRM_SUBDOMAIN` | — | Поддомен аккаунта (`live`); API — `https://<поддомен>.amocrm.ru` |
 | `AMOCRM_BASE_URL` | — | Полный адрес API вместо поддомена (например, для kommo.com) |
 | `AMOCRM_TOKEN` | — | Долгосрочный токен приватной интеграции (`live`); в `mock` можно не задавать |
@@ -439,7 +439,8 @@ id всех записей — латиница в kebab-case, уникальн�
 | `NOTE_SERVICE_NAME` | `AI-помощник` | Подпись служебного примечания |
 | `DEBOUNCE_SECONDS` | `6` | Пауза перед генерацией после последнего сообщения клиента |
 | `ON_MANAGER_REPLIED` | `upsell_only` | `upsell_only` или `skip` |
-| `WORKER_ENABLED` | `true` | Запускать ли фоновый обработчик очереди |
+| `WORKER_ENABLED` | `true` (на Vercel — `false`) | Запускать ли фоновый обработчик очереди |
+| `WORKER_ON_REQUEST` | `false` (на Vercel — `true`) | Обрабатывать созревшие задачи при опросе ленты страницы «amoCRM (mock)» — там, где фоновый цикл не работает |
 | `WORKER_CONCURRENCY` | `3` | Сколько задач обрабатывать одновременно |
 | `WORKER_POLL_SECONDS` | `0.5` | Как часто проверять очередь |
 | `JOB_MAX_ATTEMPTS` | `3` | Попыток на задачу |

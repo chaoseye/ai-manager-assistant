@@ -137,7 +137,10 @@ def test_background_worker_is_started(tmp_path):
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [
-        ({"amocrm_mode": "mock", "webhook_secret": None}, "WEBHOOK_SECRET"),
+        (
+            {"amocrm_mode": "live", "webhook_secret": None, "amocrm_subdomain": "x", "amocrm_token": "t"},
+            "WEBHOOK_SECRET",
+        ),
         ({"amocrm_mode": "live", "webhook_secret": "s"}, "AMOCRM_SUBDOMAIN"),
         ({"amocrm_mode": "live", "webhook_secret": "s", "amocrm_subdomain": "x"}, "AMOCRM_TOKEN"),
     ],
@@ -291,3 +294,15 @@ def test_vercel_defaults(monkeypatch):
     finally:
         monkeypatch.delenv("VERCEL")
         importlib.reload(config_module)
+
+
+def test_mock_mode_without_secret_disables_webhook_only(tmp_path):
+    # Так работает демо на Vercel: секрета нет, вебхук выключен, страница «amoCRM (mock)» работает.
+    settings = mock_settings(tmp_path, webhook_secret=None)
+    with TestClient(create_app(settings, llm=FakeLLM(make_suggestion()))) as client:
+        assert post_hook(client, webhook_body(), secret="anything").status_code == 404
+        sent = client.post(
+            "/api/v1/amocrm-mock/messages",
+            json={"lead_id": 1234, "chat_id": "web-1", "text": "Сколько стоит?"},
+        )
+        assert sent.status_code == 200 and sent.json()["accepted"] == 1

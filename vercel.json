@@ -1,6 +1,12 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "regions": ["fra1"],
+  "regions": [
+    "fra1"
+  ],
+  "env": {
+    "LLM_MODE": "mock",
+    "AMOCRM_MODE": "mock"
+  },
   "functions": {
     "app/main.py": {
       "maxDuration": 60,

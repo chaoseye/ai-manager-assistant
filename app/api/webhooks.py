@@ -26,8 +26,8 @@ async def amocrm_webhook(secret: str, request: Request) -> dict[str, Any]:
     if inbox is None:
         raise HTTPException(status_code=404, detail="Интеграция с amoCRM выключена (AMOCRM_MODE=off)")
     expected = settings.webhook_secret or ""
-    if not secrets.compare_digest(secret.encode(), expected.encode()):
-        raise HTTPException(status_code=404, detail="Не найдено")
+    if not expected or not secrets.compare_digest(secret.encode(), expected.encode()):
+        raise HTTPException(status_code=404, detail="Не найдено")  # без секрета вебхук выключен
 
     body = await request.body()
     try:

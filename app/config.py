@@ -110,17 +110,20 @@ class Settings(BaseSettings):
         return "https://mock.amocrm.ru"
 
     def amocrm_config_errors(self) -> list[str]:
-        """Чего не хватает для выбранного AMOCRM_MODE. Проверяется при старте сервиса."""
-        if self.amocrm_mode == "off":
+        """Чего не хватает для выбранного AMOCRM_MODE. Проверяется при старте сервиса.
+
+        В mock-режиме WEBHOOK_SECRET необязателен: без него вебхук выключен (404), а страница
+        «amoCRM (mock)» работает — она шлёт сообщения через /api/v1/amocrm-mock/messages.
+        """
+        if self.amocrm_mode != "live":
             return []
         errors: list[str] = []
         if not self.webhook_secret:
             errors.append("WEBHOOK_SECRET не задан: без него вебхуки amoCRM не принимаются")
-        if self.amocrm_mode == "live":
-            if not (self.amocrm_subdomain or self.amocrm_base_url):
-                errors.append("AMOCRM_SUBDOMAIN (или AMOCRM_BASE_URL) не задан")
-            if not self.amocrm_token:
-                errors.append("AMOCRM_TOKEN не задан: нужен долгосрочный токен приватной интеграции")
+        if not (self.amocrm_subdomain or self.amocrm_base_url):
+            errors.append("AMOCRM_SUBDOMAIN (или AMOCRM_BASE_URL) не задан")
+        if not self.amocrm_token:
+            errors.append("AMOCRM_TOKEN не задан: нужен долгосрочный токен приватной интеграции")
         return errors
 
 
