@@ -86,6 +86,7 @@ Testovoe_O_Complex/
 │   │   ├── client.py            # AmoClient: API v4, лимит запросов/с, повторы, разбор ответов
 │   │   ├── context.py           # сделка, этап, товары, имя клиента, куда писать примечание
 │   │   ├── notes.py             # тексты примечаний: подсказка, вложение, сбой
+│   │   ├── payloads.py          # сообщение «как из amoCRM»: тело вебхука для имитатора и страницы mock
 │   │   ├── fake.py              # поддельный сервер amoCRM для mock-режима и тестов
 │   │   ├── factory.py           # сборка клиента по настройкам, проверка токена
 │   │   ├── simulate.py          # консольный имитатор amoCRM
@@ -101,26 +102,27 @@ Testovoe_O_Complex/
 │   │   ├── suggest.py           # POST /api/v1/suggest, GET /api/v1/suggestions/{id}
 │   │   ├── kb.py                # GET /api/v1/kb, POST /api/v1/kb/reload
 │   │   ├── health.py            # GET /health
-│   │   ├── demo.py              # GET /, GET /api/v1/demo/scenarios
+│   │   ├── demo.py              # GET / и /amocrm (страницы), GET /api/v1/demo/scenarios
 │   │   ├── webhooks.py          # POST /webhooks/amocrm/{secret}
-│   │   ├── amocrm_mock.py       # GET /api/v1/amocrm-mock/notes, /leads (только mock-режим)
+│   │   ├── amocrm_mock.py       # /api/v1/amocrm-mock: notes, leads, feed, messages (только mock-режим)
 │   │   ├── widget.py            # GET /api/v1/leads/{id}/suggestion, regenerate (этап 3)
 │   │   ├── feedback.py          # POST /api/v1/suggestions/{id}/feedback (этап 3)
 │   │   ├── stats.py             # GET /api/v1/stats (этап 3)
 │   │   └── salesbot.py          # POST /salesbot/amocrm/{secret} (этап 3)
 │   └── web/
-│       ├── templates/index.html # демо «диалоговое окно» (F-02)
-│       └── static/              # app.js, styles.css
+│       ├── templates/           # _header.html (шапка с навигацией), index.html — прямой вызов (F-02),
+│       │                        # amocrm.html — карточка и лента сделки поддельного amoCRM
+│       └── static/              # common.js, app.js, amocrm.js, styles.css
 ├── knowledge_base/              # демо-БЗ «Климат-Демо» (формат — раздел 10)
 ├── examples/
 │   ├── dialog.json, lead.json   # вход для CLI
-│   ├── scenarios/               # 7 готовых сценариев: демо-страница и имитатор amoCRM
+│   ├── scenarios/               # 8 готовых сценариев: демо-страницы и имитатор amoCRM
 │   ├── mock_llm/                # ответы для mock-режима LLM (составлены вручную, см. README там)
 │   └── amocrm/mock_account.json # «аккаунт» поддельного amoCRM: воронка, сделки, контакты, каталог
 ├── tests/                       # раздел 12
 ├── evals/                       # раздел 12
 ├── widget/                      # виджет amoCRM, упаковывается в zip (этап 3)
-├── docs/                        # TZ, FUNCTIONALITY, STRUCTURE, AI_USAGE
+├── docs/                        # TZ, FUNCTIONALITY, STRUCTURE, AI_USAGE; screenshots/ — для README
 ├── data/                        # SQLite (в .gitignore, volume в Docker)
 ├── .env.example
 ├── .gitignore, .dockerignore
@@ -149,12 +151,13 @@ Testovoe_O_Complex/
 | `amocrm/notes.py` | Тексты примечаний: подсказка (с черновиком или без), вложение без текста, сбой | — |
 | `amocrm/fake.py` | Поддельный amoCRM: маршруты API v4 в формате документации, проверка токена, 204 для ненайденного, 400 при примечании к несуществующей сущности; примечания хранит в памяти | httpx |
 | `amocrm/factory.py` | Клиент по `AMOCRM_MODE`: `live` — настоящий API, `mock` — поверх поддельного сервера; проверка токена при старте | `client`, `fake` |
-| `amocrm/simulate.py`, `amocrm/setup_webhook.py` | Консольные инструменты: имитатор вебхуков и регистрация вебхука в живом amoCRM | `webhooks`, `factory` |
+| `amocrm/payloads.py` | Сообщение и тело вебхука в формате amoCRM — общие для имитатора и страницы «amoCRM (mock)» | `webhooks` |
+| `amocrm/simulate.py`, `amocrm/setup_webhook.py` | Консольные инструменты: имитатор вебхуков и регистрация вебхука в живом amoCRM | `payloads`, `factory` |
 | `worker/processor.py` | `Inbox.ingest()`: запись сообщений и постановка задач (пауза перед генерацией). `Worker`: фоновый цикл, задачи с `run_at ≤ now` (до `WORKER_CONCURRENCY` одновременно), выбор `full` / `upsell_only` / `skip`, контекст, ядро, проверка на устаревание, публикация, повторы, примечание о сбое, очистка по сроку хранения | `core`, `amocrm`, `storage` |
 | `storage/db.py`, `storage/repo.py` | Схема SQLite, операции с `suggestions`, `dialogs`, `messages`, `jobs`, очистка | `aiosqlite` |
 | `scenarios.py` | Модель и загрузка сценариев (без FastAPI и SDK — её импортирует имитатор) | `core/schemas` |
 | `api/*` | HTTP-роуты, проверка токенов, единый формат ошибок | `core`, `storage`, `worker` |
-| `web/*` | Демо-страница | `api` |
+| `web/*` | Страницы демо: прямой вызов (`/`) и карточка сделки поддельного amoCRM (`/amocrm`); общий JS — `common.js` | `api` |
 | `cli.py` | Разбор аргументов, вызов ядра, вывод, коды возврата | `core` |
 | `config.py` | Settings (раздел 11); относительные пути считаются от корня проекта; `amocrm_config_errors()` | pydantic-settings |
 | `logging_setup.py` | JSON-формат логов, `request_id` из middleware | — |
@@ -197,11 +200,14 @@ Testovoe_O_Complex/
 | GET | `/api/v1/kb` | `ADMIN_TOKEN`, если задан | Версия и содержимое БЗ |
 | POST | `/api/v1/kb/reload` | `ADMIN_TOKEN`, если задан | Перезагрузка БЗ: `200 {version, changed, counts}` или `422 kb_invalid` со списком ошибок |
 | GET | `/api/v1/demo/scenarios` | Открыт | Готовые сценарии демо |
-| GET | `/` | Открыт | Демо-страница |
+| GET | `/` | Открыт | Демо-страница: прямой вызов |
+| GET | `/amocrm` | Открыт | Страница «amoCRM (mock)»: карточка и лента сделки (в других режимах — подсказка, как включить) |
 | GET | `/health` | Открыт | Состояние сервиса (ниже) |
 | POST | `/webhooks/amocrm/{secret}` | Секрет в пути (`WEBHOOK_SECRET`) + сверка `account[id]` с `AMOCRM_ACCOUNT_ID`, если он задан | Вебхук amoCRM: `200 {ok, accepted, duplicates, scheduled, skipped}`; `404` — неверный секрет или `AMOCRM_MODE=off` |
 | GET | `/api/v1/amocrm-mock/notes` | Только `AMOCRM_MODE=mock` | Примечания поддельного amoCRM: `?entity_type=leads&entity_id=1234&after_id=0` |
-| GET | `/api/v1/amocrm-mock/leads` | Только `AMOCRM_MODE=mock` | Сделки поддельного аккаунта |
+| GET | `/api/v1/amocrm-mock/leads` | Только `AMOCRM_MODE=mock` | Сделки поддельного аккаунта: воронка, этап, бюджет, контакт, теги, товары |
+| POST | `/api/v1/amocrm-mock/messages` | Только `AMOCRM_MODE=mock` | `{lead_id, chat_id, text, direction: in\|out, author_name?, created_at?}` → тело вебхука в формате amoCRM → настоящий разбор и очередь. Секрет вебхука в браузер не попадает |
+| GET | `/api/v1/amocrm-mock/feed` | Только `AMOCRM_MODE=mock` | `?lead_id=&chat_id=&after_note_id=` → лента: сообщения чата и примечания по времени, у примечания — `draft` и `pitch` из сохранённой подсказки; состояние задачи диалога (`status`, `seconds_left`) |
 | GET | `/api/v1/leads/{lead_id}/suggestion` | `X-Auth-Token` (виджет) | Последняя актуальная подсказка по сделке (этап 3) |
 | POST | `/api/v1/leads/{lead_id}/regenerate` | `X-Auth-Token` | Немедленная перегенерация, `202 {job_id}` (этап 3) |
 | POST | `/api/v1/suggestions/{id}/feedback` | `X-Auth-Token` или демо | Оценка менеджера, `204` (этап 3) |
@@ -421,8 +427,8 @@ id всех записей — латиница в kebab-case, уникальн�
 | `DB_PATH` | `data/app.db` | Файл SQLite |
 | `LOG_LEVEL` | `INFO` | Уровень логов |
 | `LOG_TEXTS` | `false` | Писать ли тексты сообщений и ответов в логи |
-| `AMOCRM_MODE` | `off` | `off` / `mock` / `live` |
-| `WEBHOOK_SECRET` | — | Секрет в пути вебхука; обязателен при `mock` и `live` |
+| `AMOCRM_MODE` | `off` | `off` / `mock` / `live`; в `.env.example` для демо — `mock` |
+| `WEBHOOK_SECRET` | — | Секрет в пути вебхука; обязателен при `mock` и `live`. В `.env.example` — `dev-secret`, только для демо |
 | `AMOCRM_SUBDOMAIN` | — | Поддомен аккаунта (`live`); API — `https://<поддомен>.amocrm.ru` |
 | `AMOCRM_BASE_URL` | — | Полный адрес API вместо поддомена (например, для kommo.com) |
 | `AMOCRM_TOKEN` | — | Долгосрочный токен приватной интеграции (`live`); в `mock` можно не задавать |
@@ -459,7 +465,7 @@ tests/
 ├── test_amocrm_webhooks.py        # разбор вебхуков по примерам документации: форма, JSON, вложения, порядок
 ├── test_amocrm_client.py          # клиент против поддельного сервера: чтение, кэш, примечания, повторы, лимит; контекст
 ├── test_worker.py                 # очередь: пауза, дубли, режимы, stale, вложения, повторы, сбои, перезапуск, очистка
-├── test_webhook_api.py            # вебхук по HTTP: секрет, аккаунт, формат, путь до примечания, health, настройки
+├── test_webhook_api.py            # вебхук по HTTP, health, настройки; API и страница «amoCRM (mock)»
 └── test_amocrm_tools.py           # имитатор end-to-end через TestClient, регистрация вебхука
 evals/
 ├── cases.yaml                     # 31 кейс: вход + ожидаемые свойства результата

@@ -13,61 +13,14 @@ import json
 import sys
 import time
 import uuid
-from typing import Any
-from urllib.parse import urlencode
 
 import httpx
 
-from app.amocrm.webhooks import ELEMENT_LEAD, encode_nested_form
+from app.amocrm.payloads import FORM_CONTENT_TYPE, message_item, webhook_body
 from app.config import get_settings
 from app.scenarios import load_scenarios
 
-MANAGER_USER_ID = 101
 SECONDS_BETWEEN_MESSAGES = 30
-
-
-def message_item(
-    *,
-    direction: str,
-    text: str,
-    lead_id: int,
-    contact_id: int | None,
-    chat_id: str,
-    created_at: int,
-    author_name: str,
-) -> dict[str, Any]:
-    """Сообщение в формате вебхука amoCRM (как в примерах документации)."""
-    item: dict[str, Any] = {
-        "id": f"sim-{uuid.uuid4()}",
-        "chat_id": chat_id,
-        "talk_id": str(lead_id),
-        "contact_id": str(contact_id or ""),
-        "text": text,
-        "created_at": str(created_at),
-        "origin": "telegram",
-        "element_id": str(lead_id),
-        "element_type": str(ELEMENT_LEAD),
-    }
-    if direction == "in":
-        item["author"] = {"id": f"client-{contact_id}", "type": "external", "name": author_name}
-    else:
-        item["type"] = "outgoing"
-        item["author"] = {
-            "id": f"user-{MANAGER_USER_ID}",
-            "user_id": str(MANAGER_USER_ID),
-            "type": "internal",
-            "name": author_name,
-        }
-    return item
-
-
-def webhook_body(item: dict[str, Any], direction: str, account: dict[str, Any]) -> bytes:
-    key = "message" if direction == "in" else "outgoing_message"
-    data = {
-        key: {"add": [item]},
-        "account": {"id": str(account.get("id", "")), "subdomain": account.get("subdomain", "")},
-    }
-    return urlencode(encode_nested_form(data)).encode()
 
 
 def make_parser() -> argparse.ArgumentParser:
@@ -157,7 +110,7 @@ def main(argv: list[str] | None = None, *, http: httpx.Client | None = None) -> 
             response = http.post(
                 f"{base}/webhooks/amocrm/{secret}",
                 content=webhook_body(item, direction, seed.get("account", {})),
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                headers={"Content-Type": FORM_CONTENT_TYPE},
             )
             label = "Клиент" if direction == "in" else f"Менеджер ({name})"
             print(f"  → {label}: {text}")

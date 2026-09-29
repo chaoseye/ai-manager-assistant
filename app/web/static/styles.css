@@ -100,6 +100,14 @@ body {
   padding: 12px 20px; background: var(--surface); border-bottom: 1px solid var(--border);
 }
 .brand { font-weight: 600; }
+.brand-block { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+.nav { display: flex; gap: 4px; }
+.nav-link {
+  color: var(--muted); text-decoration: none; font-size: 14px; padding: 5px 10px; border-radius: 8px;
+}
+.nav-link:hover { background: var(--surface-2); color: var(--text); }
+.nav-link.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.nav-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .badges { display: flex; gap: 8px; flex-wrap: wrap; }
 .badge {
   font-size: 12px; padding: 3px 8px; border-radius: 999px;
@@ -256,10 +264,48 @@ textarea:focus, input:focus, select:focus, .btn:focus-visible, .tab:focus-visibl
   background: var(--text); color: var(--surface); padding: 8px 14px; border-radius: 8px; font-size: 14px;
 }
 
+/* ---------- Страница «amoCRM (mock)» ---------- */
+
+.layout-amo { grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); }
+.lead-card { padding: 16px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
+.lead-card .kv { margin: 0; }
+.field { display: grid; gap: 6px; }
+.field select { width: 100%; }
+.how summary { cursor: pointer; font-size: 14px; color: var(--muted); }
+.how ol { padding-left: 18px; margin: 8px 0; font-size: 14px; display: grid; gap: 4px; }
+
+.feed-note {
+  align-self: stretch; background: var(--upsell-soft); border: 1px solid var(--border);
+  border-left: 3px solid var(--upsell); border-radius: 8px; padding: 10px 12px;
+}
+.feed-note-head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.feed-note-service { font-weight: 600; color: var(--upsell); font-size: 14px; }
+.feed-note-text { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 14px; margin: 8px 0 0; }
+
+.queue-status { border-top: 1px solid var(--border); padding: 8px 16px; font-size: 13px; color: var(--muted); }
+.queue-status.loading::before {
+  content: ""; display: inline-block; width: 11px; height: 11px; margin-right: 8px; vertical-align: -1px;
+  border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.queue-status.error { color: var(--danger); }
+@media (prefers-reduced-motion: reduce) { .queue-status.loading::before { animation: none; } }
+
+.notice-wrap { padding: 24px 20px; display: flex; justify-content: center; }
+.notice { max-width: 640px; padding: 20px 24px; }
+.notice h1 { font-size: 20px; margin: 0 0 12px; }
+.notice pre, .notice code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px;
+  background: var(--surface-2); border-radius: 6px;
+}
+.notice pre { padding: 10px 12px; }
+.notice code { padding: 1px 4px; }
+.notice a { color: var(--accent); }
+
 /* ---------- Мобильная раскладка ---------- */
 
 @media (max-width: 900px) {
-  .layout { grid-template-columns: 1fr; height: auto; padding: 12px 16px; }
+  .layout, .layout-amo { grid-template-columns: 1fr; height: auto; padding: 12px 16px; }
   .chat { height: 70vh; }
   .assistant { min-height: 60vh; }
   .msg { max-width: 92%; }

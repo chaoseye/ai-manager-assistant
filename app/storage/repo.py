@@ -62,7 +62,13 @@ class SuggestionRepo:
         await self._db.conn.commit()
 
     async def get(self, suggestion_id: str) -> dict[str, Any] | None:
-        cursor = await self._db.conn.execute("SELECT * FROM suggestions WHERE id = ?", (suggestion_id,))
+        return await self._one("SELECT * FROM suggestions WHERE id = ?", suggestion_id)
+
+    async def get_by_note_id(self, note_id: int) -> dict[str, Any] | None:
+        return await self._one("SELECT * FROM suggestions WHERE note_id = ?", note_id)
+
+    async def _one(self, sql: str, value: object) -> dict[str, Any] | None:
+        cursor = await self._db.conn.execute(sql, (value,))
         row = await cursor.fetchone()
         await cursor.close()
         if row is None:
@@ -171,7 +177,13 @@ class DialogRepo:
         return inserted
 
     async def get(self, dialog_id: int) -> Dialog | None:
-        cursor = await self._db.conn.execute("SELECT * FROM dialogs WHERE id = ?", (dialog_id,))
+        return await self._one("SELECT * FROM dialogs WHERE id = ?", dialog_id)
+
+    async def get_by_key(self, chat_key: str) -> Dialog | None:
+        return await self._one("SELECT * FROM dialogs WHERE chat_key = ?", chat_key)
+
+    async def _one(self, sql: str, value: object) -> Dialog | None:
+        cursor = await self._db.conn.execute(sql, (value,))
         row = await cursor.fetchone()
         await cursor.close()
         if row is None:
@@ -348,6 +360,14 @@ class JobRepo:
         for job_id in ids:
             await self.retry_later(job_id, now, "прервана перезапуском сервиса", now)
         return len(ids)
+
+    async def latest_for_dialog(self, dialog_id: int) -> Job | None:
+        cursor = await self._db.conn.execute(
+            "SELECT * FROM jobs WHERE dialog_id = ? ORDER BY id DESC LIMIT 1", (dialog_id,)
+        )
+        row = await cursor.fetchone()
+        await cursor.close()
+        return _job(row) if row else None
 
     async def get(self, job_id: int) -> Job | None:
         cursor = await self._db.conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))

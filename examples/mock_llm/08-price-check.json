@@ -1,0 +1,22 @@
+{
+  "id": "price-check",
+  "match": "Сколько он стоит вместе с установкой?",
+  "suggestion": {
+    "intent": "price",
+    "sentiment": "neutral",
+    "client_reply": "Павел, Inverter 12 стоит 52 900 ₽, стандартный монтаж — 9 900 ₽, итого 62 800 ₽. Мастер приедет в течение 1–3 рабочих дней после оплаты. Когда вам удобно принять мастера?",
+    "kb_refs": ["ac-inverter-12", "install-standard", "faq-install-time"],
+    "answer_found_in_kb": true,
+    "needs_human": false,
+    "needs_human_reason": "",
+    "upsell": {
+      "recommended": true,
+      "timing": "now",
+      "product_ids": ["wifi-module"],
+      "offer": "Wi-Fi модуль — 2 900 ₽",
+      "reason": "Клиент выбирает инверторную модель, а модуль подходит только к ней: кондиционером можно управлять со смартфона.",
+      "pitch": "Павел, к Inverter 12 можно добавить Wi-Fi модуль за 2 900 ₽ — включите охлаждение по дороге домой.",
+      "avoid": ""
+    }
+  }
+}

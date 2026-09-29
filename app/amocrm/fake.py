@@ -194,17 +194,32 @@ class FakeAmoApi:
         ]
 
     def list_leads(self) -> list[dict[str, Any]]:
-        statuses = {s["id"]: s["name"] for p in self.pipelines for s in p.get("statuses", [])}
+        """Сделки для карточки на странице «amoCRM (mock)»: воронка, этап, бюджет, контакт, теги, товары."""
+        pipelines = {p["id"]: p for p in self.pipelines}
+        elements = {
+            (catalog_id, e["id"]): e["name"]
+            for catalog_id, catalog in self.catalogs.items()
+            for e in catalog.get("elements", [])
+        }
         result = []
-        for lead in self.leads.values():
+        for lead in sorted(self.leads.values(), key=lambda item: item["id"]):
+            pipeline = pipelines.get(lead.get("pipeline_id"), {})
+            statuses = {s["id"]: s["name"] for s in pipeline.get("statuses", [])}
             contact = self.contacts.get(lead["contacts"][0]) if lead.get("contacts") else None
             result.append(
                 {
                     "id": lead["id"],
                     "name": lead.get("name", ""),
+                    "pipeline": pipeline.get("name", ""),
                     "stage": statuses.get(lead.get("status_id"), ""),
+                    "price": lead.get("price", 0),
                     "contact_id": contact["id"] if contact else None,
                     "contact_name": contact.get("name", "") if contact else "",
+                    "tags": list(lead.get("tags", [])),
+                    "products": [
+                        elements.get((el["catalog_id"], el["id"]), "")
+                        for el in lead.get("catalog_elements", [])
+                    ],
                 }
             )
         return result

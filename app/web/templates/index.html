@@ -7,17 +7,7 @@
   <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
 </head>
 <body>
-<header class="topbar">
-  <div class="brand">AI-помощник менеджера <span class="muted">· демо диалогового окна CRM</span></div>
-  <div class="badges">
-    {% if llm_mode == "mock" %}
-      <span class="badge badge-warn" title="Ответы записаны заранее или найдены по FAQ; модель не вызывается">LLM: mock</span>
-    {% else %}
-      <span class="badge badge-ok" title="Ответы генерирует модель">LLM: {{ llm_model }}</span>
-    {% endif %}
-    <span class="badge" id="kb-badge" title="Версия базы знаний">БЗ: {{ kb_version }}</span>
-  </div>
-</header>
+{% include "_header.html" %}
 
 <main class="layout">
   <section class="card chat" aria-label="Диалог с клиентом">
@@ -147,6 +137,7 @@
 </main>
 
 <div id="toast" class="toast" role="status" hidden></div>
+<script src="{{ url_for('static', path='common.js') }}" defer></script>
 <script src="{{ url_for('static', path='app.js') }}" defer></script>
 </body>
 </html>

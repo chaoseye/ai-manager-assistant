@@ -8,13 +8,14 @@ TIMING_LABELS = {
     "not_now": "не предлагать сейчас",
 }
 SEPARATOR = "────────"
+REPLY_HEADER = "Черновик ответа клиенту:"
 
 
 def format_suggestion_note(result: SuggestResult, *, include_reply: bool) -> str:
     s, u = result.suggestion, result.suggestion.upsell
     lines: list[str] = []
     if include_reply:
-        lines += ["Черновик ответа клиенту:", s.client_reply]
+        lines += [REPLY_HEADER, s.client_reply]
         if s.kb_refs:
             lines.append("Основано на: " + ", ".join(s.kb_refs))
         if s.needs_human:

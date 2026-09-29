@@ -20,15 +20,24 @@ async def scenarios(settings: Settings = Depends(get_settings_dep)) -> list[Scen
     return load_scenarios(settings.scenarios_dir)
 
 
+def _page_context(request: Request, active: str) -> dict[str, object]:
+    state = request.app.state
+    return {
+        "active": active,
+        "llm_mode": state.assistant.llm.mode,
+        "llm_model": state.assistant.llm.model,
+        "kb_version": state.kb_store.current.version,
+        "amocrm_mode": state.settings.amocrm_mode,
+        "debounce_seconds": state.settings.debounce_seconds,
+    }
+
+
 @router.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def index(request: Request) -> HTMLResponse:
-    state = request.app.state
-    return TEMPLATES.TemplateResponse(
-        request,
-        "index.html",
-        {
-            "llm_mode": state.assistant.llm.mode,
-            "llm_model": state.assistant.llm.model,
-            "kb_version": state.kb_store.current.version,
-        },
-    )
+    return TEMPLATES.TemplateResponse(request, "index.html", _page_context(request, "direct"))
+
+
+@router.get("/amocrm", response_class=HTMLResponse, include_in_schema=False)
+async def amocrm_page(request: Request) -> HTMLResponse:
+    """Карточка сделки поддельного amoCRM: чат и служебные примечания AI-помощника в одной ленте."""
+    return TEMPLATES.TemplateResponse(request, "amocrm.html", _page_context(request, "amocrm"))

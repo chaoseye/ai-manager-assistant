@@ -39,7 +39,8 @@
     {"id": 3001239, "name": "", "leads": [1239]},
     {"id": 3001101, "name": "Мария", "leads": [1101]},
     {"id": 3001300, "name": "Олег", "leads": [1300, 1301]},
-    {"id": 3001400, "name": "Елена", "leads": []}
+    {"id": 3001400, "name": "Елена", "leads": []},
+    {"id": 3001240, "name": "Павел", "leads": [1240]}
   ],
   "leads": [
     {
@@ -79,6 +80,11 @@
       "pipeline_id": 7000001, "status_id": 142, "updated_at": 1780000000,
       "contacts": [3001101], "tags": ["whatsapp"],
       "catalog_elements": [{"id": 90002, "catalog_id": 5001}, {"id": 90010, "catalog_id": 5001}]
+    },
+    {
+      "id": 1240, "name": "Кондиционер в гостиную", "price": 0,
+      "pipeline_id": 7000001, "status_id": 7100002, "updated_at": 1790600600,
+      "contacts": [3001240], "tags": ["telegram"], "catalog_elements": []
     },
     {
       "id": 1300, "name": "Старая заявка", "price": 0,

@@ -1,0 +1,18 @@
+<header class="topbar">
+  <div class="brand-block">
+    <div class="brand">AI-помощник менеджера</div>
+    <nav class="nav" aria-label="Разделы демо">
+      <a href="/" class="nav-link{% if active == 'direct' %} active{% endif %}"{% if active == 'direct' %} aria-current="page"{% endif %}>Прямой вызов</a>
+      <a href="/amocrm" class="nav-link{% if active == 'amocrm' %} active{% endif %}"{% if active == 'amocrm' %} aria-current="page"{% endif %}>amoCRM (mock)</a>
+    </nav>
+  </div>
+  <div class="badges">
+    {% if llm_mode == "mock" %}
+      <span class="badge badge-warn" title="Ответы записаны заранее или найдены по FAQ; модель не вызывается">LLM: mock</span>
+    {% else %}
+      <span class="badge badge-ok" title="Ответы генерирует модель">LLM: {{ llm_model }}</span>
+    {% endif %}
+    <span class="badge{% if amocrm_mode == 'live' %} badge-ok{% elif amocrm_mode == 'mock' %} badge-warn{% endif %}" title="Режим интеграции с amoCRM">amoCRM: {{ amocrm_mode }}</span>
+    <span class="badge" id="kb-badge" title="Версия базы знаний">БЗ: {{ kb_version }}</span>
+  </div>
+</header>

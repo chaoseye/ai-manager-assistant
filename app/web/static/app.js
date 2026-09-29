@@ -1,10 +1,8 @@
 "use strict";
 
-// Демо «диалоговое окно»: чат слева, подсказка AI-помощника справа.
-// Вся разметка строится через textContent — пользовательский текст не попадает в innerHTML.
+// Демо «прямой вызов»: чат слева, подсказка AI-помощника справа. Общие функции — в common.js.
 
 const CLIENT_DEBOUNCE_MS = 1500;
-const ROLE_LABEL = { client: "Клиент", manager: "Менеджер", bot: "Бот" };
 const TIMING = {
   now: { label: "предложить сейчас", cls: "pill-now" },
   after_resolution: { label: "после решения вопроса", cls: "pill-later" },
@@ -27,50 +25,6 @@ const state = {
   suggestionForIndex: -1,
   kbLoaded: false,
 };
-
-const $ = (id) => document.getElementById(id);
-
-function el(tag, props = {}, ...children) {
-  const node = document.createElement(tag);
-  for (const [key, value] of Object.entries(props)) {
-    if (key === "class") node.className = value;
-    else if (key === "text") node.textContent = value;
-    else node.setAttribute(key, value);
-  }
-  for (const child of children) {
-    if (child == null) continue;
-    node.append(child instanceof Node ? child : document.createTextNode(String(child)));
-  }
-  return node;
-}
-
-function formatTime(iso) {
-  if (!iso) return "";
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-}
-
-function toast(text) {
-  const node = $("toast");
-  node.textContent = text;
-  node.hidden = false;
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => { node.hidden = true; }, 1800);
-}
-
-async function copyText(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    const area = el("textarea");
-    area.value = text;
-    document.body.append(area);
-    area.select();
-    document.execCommand("copy");
-    area.remove();
-  }
-  toast("Скопировано");
-}
 
 function setStatus(text, kind = "") {
   const node = $("status");
@@ -191,15 +145,6 @@ function scheduleSuggestion() {
   clearTimeout(state.debounceTimer);
   setStatus("Жду, не допишет ли клиент ещё…", "muted");
   state.debounceTimer = setTimeout(requestSuggestion, CLIENT_DEBOUNCE_MS);
-}
-
-function errorText(data, status) {
-  const error = data && data.error;
-  if (!error) return `Ошибка сервиса (${status})`;
-  if (error.code === "invalid_request" && Array.isArray(error.details) && error.details.length) {
-    return `Некорректный запрос: ${error.details[0].msg}`;
-  }
-  return error.message || `Ошибка сервиса (${status})`;
 }
 
 async function requestSuggestion() {
@@ -347,10 +292,6 @@ function adminHeaders() {
   let token = null;
   try { token = sessionStorage.getItem("adminToken"); } catch { /* хранилище недоступно */ }
   return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
-function rub(value) {
-  return `${value.toLocaleString("ru-RU")} ₽`;
 }
 
 function renderKb(kb) {

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Сделка в amoCRM (mock)</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+</head>
+<body>
+{% include "_header.html" %}
+
+{% if amocrm_mode != "mock" %}
+<main class="notice-wrap">
+  <section class="card notice">
+    <h1>Эта страница работает с поддельным amoCRM</h1>
+    <p>Сейчас <code>AMOCRM_MODE={{ amocrm_mode }}</code>. Чтобы показать путь «чат amoCRM → вебхук → очередь → примечание в сделке» без аккаунта amoCRM, задайте в <code>.env</code>:</p>
+    <pre>AMOCRM_MODE=mock
+WEBHOOK_SECRET=dev-secret</pre>
+    <p>и перезапустите сервис.</p>
+    {% if amocrm_mode == "live" %}
+    <p>В режиме <code>live</code> примечания AI-помощника появляются в ленте сделок настоящего amoCRM.</p>
+    {% endif %}
+    <p><a href="/">← Вернуться к прямому вызову</a></p>
+  </section>
+</main>
+{% else %}
+<main class="layout layout-amo">
+  <aside class="card lead-card" aria-label="Карточка сделки">
+    <div class="field">
+      <label for="lead-select" class="small muted">Сделка поддельного аккаунта</label>
+      <select id="lead-select"></select>
+    </div>
+    <dl class="kv" id="lead-fields"></dl>
+
+    <div class="field">
+      <label for="amo-scenario" class="small muted">Проиграть сценарий</label>
+      <select id="amo-scenario">
+        <option value="">Готовый сценарий…</option>
+      </select>
+      <p class="muted small" id="scenario-desc" hidden></p>
+    </div>
+    <button type="button" id="new-chat" class="btn">Начать новый чат</button>
+
+    <details class="how">
+      <summary>Как это работает</summary>
+      <ol>
+        <li>Сообщение уходит в сервис телом вебхука в формате amoCRM — через тот же разбор, что и у настоящего аккаунта.</li>
+        <li>Сервис ждёт {{ debounce_seconds|round|int }} с тишины: клиент может дописать ещё.</li>
+        <li>Фоновый обработчик берёт данные сделки из (поддельного) API amoCRM и вызывает ядро.</li>
+        <li>Результат появляется в ленте сделки служебным примечанием «AI-помощник».</li>
+      </ol>
+      <p class="muted small">Ответьте за менеджера до конца паузы — примечание будет без черновика, только с допродажей.</p>
+    </details>
+  </aside>
+
+  <section class="card chat" aria-label="Лента сделки">
+    <div class="chat-head">
+      <div class="lead-info">
+        <div class="lead-title" id="feed-title">Лента сделки</div>
+        <div class="muted small" id="feed-sub"></div>
+      </div>
+    </div>
+
+    <div class="messages" id="feed" aria-live="polite"></div>
+    <div id="queue-status" class="queue-status" role="status" hidden></div>
+
+    <form class="composer" id="amo-composer">
+      <div class="role-switch" role="radiogroup" aria-label="От чьего имени сообщение">
+        <label><input type="radio" name="amo-role" value="in" checked> Клиент</label>
+        <label><input type="radio" name="amo-role" value="out"> Менеджер</label>
+      </div>
+      <div class="composer-row">
+        <label class="visually-hidden" for="amo-input">Сообщение</label>
+        <textarea id="amo-input" rows="2" placeholder="Сообщение… Enter — отправить, Shift+Enter — новая строка"></textarea>
+        <button type="submit" class="btn btn-primary">Отправить как из amoCRM</button>
+      </div>
+    </form>
+  </section>
+</main>
+{% endif %}
+
+<div id="toast" class="toast" role="status" hidden></div>
+<script src="{{ url_for('static', path='common.js') }}" defer></script>
+{% if amocrm_mode == "mock" %}
+<script src="{{ url_for('static', path='amocrm.js') }}" defer></script>
+{% endif %}
+</body>
+</html>

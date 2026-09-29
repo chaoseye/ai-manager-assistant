@@ -54,7 +54,7 @@ def create_app(
         app.state.kb_store = kb_store
         app.state.assistant = assistant
         app.state.repo = suggestions
-        app.state.inbox = app.state.worker = app.state.jobs = app.state.fake_amo = None
+        app.state.inbox = app.state.worker = app.state.jobs = app.state.dialogs = app.state.fake_amo = None
         app.state.amocrm_problem = None
 
         amo: AmoClient | None = None
@@ -64,6 +64,7 @@ def create_app(
             app.state.amocrm_problem = await check_amocrm(amo)
             dialogs, jobs = DialogRepo(db), JobRepo(db)
             app.state.jobs = jobs
+            app.state.dialogs = dialogs
             app.state.inbox = Inbox(db, dialogs, jobs, settings)
             worker = Worker(
                 settings=settings,

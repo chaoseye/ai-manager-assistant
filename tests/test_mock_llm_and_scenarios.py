@@ -12,6 +12,8 @@ from tests.conftest import make_settings
 
 SCENARIOS = load_scenarios(BASE_DIR / "examples" / "scenarios")
 RECORDINGS = load_recordings(BASE_DIR / "examples" / "mock_llm")
+# Сценарий с намеренной ошибкой в цене: на нём проверка цен должна сработать.
+GUARD_DEMO = "price-check"
 
 
 def split_dialog(scenario):
@@ -23,7 +25,7 @@ def split_dialog(scenario):
 
 
 def test_every_scenario_has_a_recording():
-    assert len(SCENARIOS) == 7
+    assert len(SCENARIOS) == 8
     for scenario in SCENARIOS:
         _, message = split_dialog(scenario)
         assert normalize(message) in RECORDINGS, scenario.id
@@ -35,6 +37,11 @@ def test_recordings_pass_guards(kb, scenario):
     request = SuggestRequest(message=message, history=history, lead=scenario.lead, channel=scenario.channel)
     recording = RECORDINGS[normalize(message)]
     result, warnings = apply_guards(recording.suggestion, kb, request, "full")
+    if scenario.id == GUARD_DEMO:
+        assert [w.code for w in warnings] == ["price_not_in_kb"]
+        assert "52 900 ₽" in warnings[0].message  # ошибочная цена; итог 62 800 ₽ выводится из неё и монтажа
+        assert result.needs_human is True
+        return
     assert warnings == [], [w.message for w in warnings]
     assert result == recording.suggestion
 
@@ -48,7 +55,7 @@ async def test_scenarios_end_to_end_in_mock_mode(kb_store, tmp_path, scenario):
         SuggestRequest(message=message, history=history, lead=scenario.lead, channel=scenario.channel)
     )
     assert result.meta.llm_mode == "mock"
-    assert result.meta.warnings == []
+    assert (result.meta.warnings != []) is (scenario.id == GUARD_DEMO)
     assert result.suggestion.client_reply
 
 
