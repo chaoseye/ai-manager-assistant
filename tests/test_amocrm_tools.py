@@ -143,12 +143,16 @@ def flaky_webhooks(fake: FakeAmoApi, failures: int) -> tuple[httpx.MockTransport
 async def test_register_retries_invalid_url(tmp_path):
     fake = FakeAmoApi.from_file(SEED, token="live-token")
     transport, calls = flaky_webhooks(fake, failures=2)
-    retries: list[int] = []
+    retries: list[tuple[int, float]] = []
     destination = await register(
-        "https://abc.lhr.life", live_settings(tmp_path), transport, retry_seconds=0, on_retry=retries.append
+        "https://abc.lhr.life",
+        live_settings(tmp_path),
+        transport,
+        retry_delays=(0, 0.01, 0),
+        on_retry=lambda attempt, delay: retries.append((attempt, delay)),
     )
     assert destination == f"https://abc.lhr.life/webhooks/amocrm/{HOOK_SECRET}"
-    assert len(calls) == 3 and retries == [1, 2]
+    assert len(calls) == 3 and retries == [(2, 0), (3, 0.01)]  # номер следующей попытки и пауза перед ней
     assert [w["destination"] for w in fake.webhooks] == [destination]
 
 
@@ -156,9 +160,7 @@ async def test_register_gives_up_with_explanation(tmp_path):
     fake = FakeAmoApi.from_file(SEED, token="live-token")
     transport, calls = flaky_webhooks(fake, failures=99)
     with pytest.raises(AmoRequestError, match="ищет домен в DNS") as excinfo:
-        await register(
-            "https://abc.lhr.life/", live_settings(tmp_path), transport, attempts=3, retry_seconds=0
-        )
+        await register("https://abc.lhr.life/", live_settings(tmp_path), transport, retry_delays=(0, 0))
     assert len(calls) == 3 and fake.webhooks == []
     assert "адрес https://abc.lhr.life («Invalid URL»)" in str(excinfo.value)
     assert HOOK_SECRET not in str(excinfo.value)
@@ -173,7 +175,7 @@ async def test_register_does_not_retry_other_errors(tmp_path):
 
     with pytest.raises(AmoRequestError, match="unknown event"):
         await register(
-            "https://abc.lhr.life", live_settings(tmp_path), httpx.MockTransport(handle), retry_seconds=0
+            "https://abc.lhr.life", live_settings(tmp_path), httpx.MockTransport(handle), retry_delays=(0,)
         )
     assert len(calls) == 1
 
@@ -278,3 +280,36 @@ def test_setup_webhook_cli_stops_on_failed_check(tmp_path, monkeypatch, capsys):
     assert setup_webhook.main(["https://abc.lhr.life"]) == 1
     err = capsys.readouterr().err
     assert "туннель не запущен" in err and "--no-check" in err
+
+
+def test_default_retry_window_is_about_a_minute():
+    # Свежий адрес туннеля amoCRM на живом аккаунте находил в DNS только примерно через минуту.
+    assert 5 <= len(setup_webhook.INVALID_URL_RETRY_DELAYS) + 1 <= 6
+    assert 50 <= sum(setup_webhook.INVALID_URL_RETRY_DELAYS) <= 90
+
+
+def test_setup_webhook_cli_warns_about_late_first_delivery(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(setup_webhook, "get_settings", lambda: live_settings(tmp_path))
+
+    async def ok(*args, **kwargs):
+        return None
+
+    async def register_after_retry(public_url, settings, *args, on_retry=None, **kwargs):
+        on_retry(2, 5.0)
+        return setup_webhook.webhook_destination(public_url, settings)
+
+    monkeypatch.setattr(setup_webhook, "check_destination", ok)
+    monkeypatch.setattr(setup_webhook, "register", register_after_retry)
+    assert setup_webhook.main(["https://abc.lhr.life"]) == 0
+    out, err = capsys.readouterr()
+    assert "Вебхук зарегистрирован: https://abc.lhr.life/webhooks/amocrm/***" in out
+    assert HOOK_SECRET not in out + err
+    assert "повтор через 5 с (попытка 2 из 5)" in err
+    assert "с опозданием до 5 минут" in err
+
+    async def register_first_try(public_url, settings, *args, **kwargs):
+        return setup_webhook.webhook_destination(public_url, settings)
+
+    monkeypatch.setattr(setup_webhook, "register", register_first_try)
+    assert setup_webhook.main(["https://abc.lhr.life"]) == 0
+    assert "с опозданием" not in capsys.readouterr().err
