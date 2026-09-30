@@ -305,11 +305,11 @@ def test_setup_webhook_cli_warns_about_late_first_delivery(tmp_path, monkeypatch
     assert "Вебхук зарегистрирован: https://abc.lhr.life/webhooks/amocrm/***" in out
     assert HOOK_SECRET not in out + err
     assert "повтор через 5 с (попытка 2 из 5)" in err
-    assert "с опозданием до 5 минут" in err
+    assert "могут опаздывать на несколько минут" in err
 
     async def register_first_try(public_url, settings, *args, **kwargs):
         return setup_webhook.webhook_destination(public_url, settings)
 
     monkeypatch.setattr(setup_webhook, "register", register_first_try)
     assert setup_webhook.main(["https://abc.lhr.life"]) == 0
-    assert "с опозданием" not in capsys.readouterr().err
+    assert "опаздывать" not in capsys.readouterr().err
