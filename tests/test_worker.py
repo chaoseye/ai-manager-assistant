@@ -379,7 +379,10 @@ async def test_retention_cleanup(env):
     await env.ingest(incoming("m1", "Привет"))
     env.clock.advance(6)
     await env.worker.tick()
-    env.clock.advance(31 * 24 * 3600)
+    # Время подсказки ассистент берёт из настоящих часов, остальное — из часов теста. Переводим часы
+    # теста дальше обоих: с T0 + 31 день тест начинал падать, как только настоящая дата его переходила.
+    later = max(env.clock.now, datetime.now(UTC)) + timedelta(days=env.settings.retention_days + 1)
+    env.clock.advance((later - env.clock.now).total_seconds())
     await env.worker._maybe_cleanup()
     for table in ("messages", "suggestions", "jobs", "dialogs"):
         cursor = await env.db.conn.execute(f"SELECT COUNT(*) FROM {table}")

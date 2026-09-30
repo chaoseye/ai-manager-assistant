@@ -19,7 +19,7 @@
 import argparse
 import asyncio
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import httpx
 
@@ -28,8 +28,9 @@ from app.amocrm.factory import build_amo_client
 from app.config import Settings, get_settings
 
 EVENTS = ["add_message", "add_outgoing_message"]
-INVALID_URL_ATTEMPTS = 4
-INVALID_URL_RETRY_SECONDS = 5.0
+# Паузы между попытками при «Invalid URL»: свежий адрес туннеля amoCRM находил в DNS и через 15 с,
+# и только через минуту, поэтому паузы растут — всего около минуты.
+INVALID_URL_RETRY_DELAYS = (5.0, 10.0, 20.0, 30.0)
 CHECK_TIMEOUT_SECONDS = 15.0
 
 
@@ -57,24 +58,24 @@ async def register(
     settings: Settings,
     transport: httpx.AsyncBaseTransport | None = None,
     *,
-    attempts: int = INVALID_URL_ATTEMPTS,
-    retry_seconds: float = INVALID_URL_RETRY_SECONDS,
-    on_retry: Callable[[int], None] | None = None,
+    retry_delays: Sequence[float] = INVALID_URL_RETRY_DELAYS,
+    on_retry: Callable[[int, float], None] | None = None,
 ) -> str:
-    """Подписывает адрес вебхука на события; при «Invalid URL» повторяет до attempts раз."""
+    """Подписывает адрес вебхука на события. При «Invalid URL» повторяет с паузами retry_delays;
+    on_retry(номер следующей попытки, пауза) вызывается перед каждой паузой."""
     validate(public_url, settings)
     destination = webhook_destination(public_url, settings)
+    attempts = len(retry_delays) + 1
     amo, _ = build_amo_client(settings, transport)
     try:
-        attempt = 1
-        while True:
+        for attempt in range(1, attempts + 1):
             try:
                 await amo.subscribe_webhook(destination, EVENTS)
                 return destination
             except AmoRequestError as exc:
                 if not _invalid_url(exc):
                     raise
-                if attempt >= attempts:
+                if attempt == attempts:
                     raise AmoRequestError(
                         f"amoCRM не принял адрес {public_url.rstrip('/')} («Invalid URL») "
                         f"с {attempts} попыток. При регистрации amoCRM сам ищет домен в DNS и отклоняет "
@@ -82,10 +83,11 @@ async def register(
                         "и повторите через минуту",
                         exc.status,
                     ) from exc
+            delay = retry_delays[attempt - 1]
             if on_retry is not None:
-                on_retry(attempt)
-            await asyncio.sleep(retry_seconds)
-            attempt += 1
+                on_retry(attempt + 1, delay)
+            await asyncio.sleep(delay)
+        raise AssertionError("недостижимо: последняя попытка либо вернула адрес, либо бросила ошибку")
     finally:
         await amo.aclose()
 
@@ -152,11 +154,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     settings = get_settings()
 
-    def on_retry(attempt: int) -> None:
+    retries: list[int] = []
+
+    def on_retry(attempt: int, delay: float) -> None:
+        retries.append(attempt)
         print(
-            f"amoCRM ещё не видит домен («Invalid URL»), повтор через {INVALID_URL_RETRY_SECONDS:.0f} с "
-            f"(попытка {attempt + 1} из {INVALID_URL_ATTEMPTS})",
+            f"amoCRM ещё не видит домен («Invalid URL»), повтор через {delay:.0f} с "
+            f"(попытка {attempt} из {len(INVALID_URL_RETRY_DELAYS) + 1})",
             file=sys.stderr,
+            flush=True,
         )
 
     try:
@@ -174,6 +180,14 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     masked = destination.replace(settings.webhook_secret or "", "***")
     print(f"Вебхук зарегистрирован: {masked} ({', '.join(EVENTS)})")
+    if retries:
+        # На живом аккаунте после такого вебхуки шли с опозданием 1–6 минут вместо 2 секунд.
+        print(
+            "amoCRM не сразу нашёл домен — вебхуки на этот адрес могут опаздывать на несколько минут. "
+            "Отправьте пробное сообщение заранее. Если оно опоздало, перезапустите туннель "
+            "и зарегистрируйте новый адрес через минуту-две после его запуска.",
+            file=sys.stderr,
+        )
     return 0
 
 
