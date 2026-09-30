@@ -24,6 +24,7 @@ const state = {
   suggestion: null,   // последний ответ /api/v1/suggest
   suggestionForIndex: -1,
   kbLoaded: false,
+  livePassword: null, // пароль живой модели на стенде в mock-режиме (только до закрытия вкладки)
 };
 
 function setStatus(text, kind = "") {
@@ -171,15 +172,22 @@ async function requestSuggestion() {
   const url = picked && !picked.dataset.default
     ? `/api/v1/suggest?provider=${encodeURIComponent(picked.value)}`
     : "/api/v1/suggest";
+  const headers = { "Content-Type": "application/json" };
+  if (state.livePassword) headers["X-Live-Password"] = state.livePassword;
   try {
     const response = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(body),
       signal: state.controller.signal,
     });
     const data = await response.json().catch(() => null);
     if (seq !== state.requestSeq) return;
+    if (response.status === 401 && state.livePassword) {
+      liveLogout();
+      setStatus("Пароль живой модели больше не действует — войдите снова.", "error");
+      return;
+    }
     if (!response.ok) {
       setStatus(errorText(data, response.status), "error");
       return;
@@ -368,6 +376,98 @@ async function reloadKb() {
   $("kb-status").textContent = result.changed ? `Загружена новая версия ${result.version}` : `Без изменений (${result.version})`;
 }
 
+// ---------- Живая модель за паролем (стенд в mock-режиме) ----------
+
+function restoreProvider() {
+  const select = $("llm-provider");
+  try {
+    const saved = localStorage.getItem("llmProvider");
+    const option = [...select.options].find((o) => o.value === saved);
+    if (option && !option.disabled) select.value = saved;
+  } catch { /* хранилище недоступно */ }
+}
+
+function fillProviders(data) {
+  const select = $("llm-provider");
+  select.replaceChildren(...data.providers.map((p) => {
+    const option = el("option", { value: p.id, text: `${p.name} · ${p.model}${p.available ? "" : " — недоступна"}` });
+    option.disabled = !p.available;
+    if (p.default) {
+      option.dataset.default = "1";
+      option.selected = true;
+    }
+    return option;
+  }));
+  restoreProvider();
+}
+
+function showLive(on) {
+  $("llm-badge").hidden = on;
+  $("live-open").hidden = on;
+  $("live-picker").hidden = !on;
+  $("live-logout").hidden = !on;
+  $("live-form").hidden = true;
+  $("live-open").setAttribute("aria-expanded", "false");
+}
+
+async function liveLogin(password, { silent = false } = {}) {
+  const error = $("live-error");
+  error.hidden = true;
+  try {
+    const data = await fetchJSON("/api/v1/live/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    state.livePassword = password;
+    try { sessionStorage.setItem("livePassword", password); } catch { /* хранилище недоступно */ }
+    fillProviders(data);
+    showLive(true);
+    if (!silent) toast("Живая модель включена");
+  } catch (exc) {
+    liveLogout();
+    if (!silent) {
+      error.textContent = exc.message;
+      error.hidden = false;
+      $("live-form").hidden = false;
+    }
+  }
+}
+
+function liveLogout() {
+  state.livePassword = null;
+  try { sessionStorage.removeItem("livePassword"); } catch { /* хранилище недоступно */ }
+  $("llm-provider").replaceChildren();
+  showLive(false);
+}
+
+function initLiveDemo() {
+  const form = $("live-form");
+  $("live-open").addEventListener("click", () => {
+    form.hidden = !form.hidden;
+    $("live-open").setAttribute("aria-expanded", String(!form.hidden));
+    if (!form.hidden) $("live-password").focus();
+  });
+  $("live-cancel").addEventListener("click", () => {
+    form.hidden = true;
+    $("live-open").setAttribute("aria-expanded", "false");
+  });
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const input = $("live-password");
+    const password = input.value;
+    input.value = "";
+    if (password) liveLogin(password);
+  });
+  $("live-logout").addEventListener("click", () => {
+    liveLogout();
+    toast("Снова записанные ответы");
+  });
+  let saved = null;
+  try { saved = sessionStorage.getItem("livePassword"); } catch { /* хранилище недоступно */ }
+  if (saved) liveLogin(saved, { silent: true });
+}
+
 // ---------- Вкладки и события ----------
 
 function openTab(name) {
@@ -413,18 +513,15 @@ function init() {
   $("copy-pitch").addEventListener("click", () => state.suggestion && copyText(state.suggestion.suggestion.upsell.pitch));
   $("regenerate").addEventListener("click", requestSuggestion);
 
-  // Выбор модели (только в режиме live): запоминаем между визитами.
+  // Выбор модели (режим live или живое демо): запоминаем между визитами.
   const providerSelect = $("llm-provider");
   if (providerSelect) {
-    try {
-      const saved = localStorage.getItem("llmProvider");
-      const option = [...providerSelect.options].find((o) => o.value === saved);
-      if (option && !option.disabled) providerSelect.value = saved;
-    } catch { /* хранилище недоступно */ }
+    restoreProvider();
     providerSelect.addEventListener("change", () => {
       try { localStorage.setItem("llmProvider", providerSelect.value); } catch { /* хранилище недоступно */ }
     });
   }
+  if ($("live-demo")) initLiveDemo();
 
   $("scenario-select").addEventListener("change", (event) => applyScenario(event.target.value));
   $("new-dialog").addEventListener("click", () => {

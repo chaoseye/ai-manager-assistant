@@ -1,9 +1,10 @@
 """Детерминированные проверки результата модели: выполняются кодом до показа менеджеру."""
 
+import re
 from dataclasses import dataclass
 from itertools import combinations, combinations_with_replacement
 
-from app.core.money import extract_amounts
+from app.core.money import extract_amounts, group_digits
 from app.core.schemas import GuardWarning, Mode, Suggestion, SuggestRequest
 from app.kb.models import KnowledgeBase
 
@@ -14,6 +15,7 @@ MIN_FLAT_FEE = 100  # суммы из текстов БЗ меньше этой 
 MAX_MENTIONED = 8  # сколько названных в тексте сумм перебирать как слагаемые итога
 
 _CACHE_KEY = "guards_amount_rules"
+_DISTINCTIVE_KEY = "guards_distinctive_stems"
 
 
 @dataclass(frozen=True)
@@ -110,6 +112,51 @@ def _conversation_amounts(request: SuggestRequest) -> set[int]:
     return {round(value) for text in texts for _, value in extract_amounts(text)}
 
 
+_WORD_RE = re.compile(r"[а-яёa-z0-9]+", re.IGNORECASE)
+# Внутреннее устройство помощника: клиент о нём не знает, и в ответе ему это звучит странно.
+_INTERNAL_RE = re.compile(
+    r"баз[аеуыо]й? знаний|промпт|(?:игнорир\w*|мо[иейх]\w*|сво[иейх]\w*|предыдущ\w*|системн\w*)\s+инструкци",
+    re.IGNORECASE,
+)
+
+
+def _stems(text: str) -> set[str]:
+    """Основы слов (первые 5 букв) — чтобы «очистителя воздуха» совпало с «Очиститель воздуха»."""
+    return {w[:5] for w in _WORD_RE.findall(text.lower().replace("ё", "е")) if len(w) >= 3}
+
+
+def _distinctive_stems(kb: KnowledgeBase) -> dict[str, list[str]]:
+    """Для каждого товара — основы слов названия, которых нет в названиях других товаров, по порядку.
+
+    У кондиционеров их нет: названия различаются только цифрами (Basic 07 / 09 / 12), поэтому их
+    упоминание по названию не отличить от упоминания основного товара — такие товары не проверяем.
+    """
+    cached = kb._cache.get(_DISTINCTIVE_KEY)
+    if cached is not None:
+        return cached
+    ordered = {
+        p.id: list(
+            dict.fromkeys(w[:5] for w in _WORD_RE.findall(p.name.lower().replace("ё", "е")) if len(w) >= 3)
+        )
+        for p in kb.products
+    }
+    counts: dict[str, int] = {}
+    for stems in ordered.values():
+        for stem in stems:
+            counts[stem] = counts.get(stem, 0) + 1
+    result = {pid: [stem for stem in stems if counts[stem] == 1] for pid, stems in ordered.items()}
+    kb._cache[_DISTINCTIVE_KEY] = result
+    return result
+
+
+def _named_in(text_stems: set[str], distinctive: list[str], *, loose: bool = False) -> bool:
+    """Товар назван в тексте: есть первое отличительное слово названия и всего совпало хотя бы два
+    (loose — достаточно первого: клиент пишет коротко, «а очиститель у вас есть?»)."""
+    if not distinctive or distinctive[0] not in text_stems:
+        return False
+    return loose or len(set(distinctive) & text_stems) >= min(2, len(distinctive))
+
+
 def _add_needs_human(suggestion: Suggestion, reason: str) -> None:
     suggestion.needs_human = True
     current = suggestion.needs_human_reason.strip()
@@ -118,9 +165,15 @@ def _add_needs_human(suggestion: Suggestion, reason: str) -> None:
 
 
 def apply_guards(
-    suggestion: Suggestion, kb: KnowledgeBase, request: SuggestRequest, mode: Mode
+    suggestion: Suggestion,
+    kb: KnowledgeBase,
+    request: SuggestRequest,
+    mode: Mode,
+    *,
+    upsell_in_reply: bool = False,
 ) -> tuple[Suggestion, list[GuardWarning]]:
-    """Возвращает исправленную копию результата и список предупреждений."""
+    """Возвращает исправленную копию результата и список предупреждений.
+    upsell_in_reply — разрешено ли предлагать допродажу прямо в ответе клиенту (UPSELL_IN_REPLY)."""
     result = suggestion.model_copy(deep=True)
     warnings: list[GuardWarning] = []
 
@@ -130,6 +183,10 @@ def apply_guards(
     if mode == "upsell_only":
         result.client_reply = ""
         result.kb_refs = []
+    # Формат сумм «9 900 ₽» — модели иногда пишут «9900 ₽». Значение не меняется, только запись.
+    result.client_reply = group_digits(result.client_reply)
+    result.upsell.pitch = group_digits(result.upsell.pitch)
+    result.upsell.offer = group_digits(result.upsell.offer)
 
     # Ссылки на БЗ.
     valid_refs = [ref for ref in dict.fromkeys(result.kb_refs) if ref in kb.all_ids]
@@ -153,6 +210,24 @@ def apply_guards(
             "upsell_without_products",
             "Допродажа рекомендована без товаров из базы знаний — рекомендация снята.",
         )
+
+    # Допродажа в ответе клиенту, хотя решение о ней за менеджером. Товары, которые клиент назвал сам
+    # или которые уже есть в сделке, не считаем: о них ответ говорит по делу.
+    if not upsell_in_reply and mode == "full":
+        distinctive = _distinctive_stems(kb)
+        reply_stems = _stems(result.client_reply)
+        context_stems = _stems(" ".join([request.message, *(m.text for m in request.history)]))
+        in_deal = set(request.lead.products) if request.lead else set()
+        for pid in upsell.product_ids:
+            product = kb.products_by_id[pid]
+            if pid in in_deal or _named_in(context_stems, distinctive[pid], loose=True):
+                continue
+            if _named_in(reply_stems, distinctive[pid]):
+                warn(
+                    "upsell_in_reply",
+                    f"Товар из допродажи «{product.name}» назван в ответе клиенту — "
+                    "предлагать его или нет, решает менеджер.",
+                )
 
     # Допродажа при жалобе или негативе.
     if (result.sentiment == "negative" or result.intent == "complaint") and upsell.timing == "now":
@@ -179,6 +254,14 @@ def apply_guards(
                 "upsell_price_not_in_kb",
                 f"Сумма «{raw}» в подсказке по допродаже не выводится из базы знаний — проверьте цену.",
             )
+
+    # Внутренние термины в ответе клиенту.
+    internal = _INTERNAL_RE.search(result.client_reply)
+    if internal:
+        warn(
+            "internal_terms",
+            f"Ответ клиенту упоминает внутреннее устройство помощника («{internal.group(0)}») — перепишите.",
+        )
 
     # Запрещённые фразы.
     for label, text in (("ответе клиенту", result.client_reply), ("фразе допродажи", upsell.pitch)):

@@ -30,6 +30,8 @@ async def health(request: Request) -> dict[str, Any]:
         "amocrm": state.settings.amocrm_mode,
         **problems,
     }
+    if getattr(state, "live_demo", None) is not None:
+        body["live_demo"] = "enabled"  # живая модель за паролем
     if llm.mode != "mock":
         # Остальные модели на статус не влияют: без них работает всё, кроме их выбора.
         body["llm_providers"] = {

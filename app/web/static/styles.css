@@ -122,6 +122,15 @@ body {
   cursor: pointer;
 }
 .badge-select select option { color: var(--text); background: var(--surface); }
+.btn-small { font-size: 12px; padding: 3px 10px; }
+.live-demo { position: relative; display: flex; align-items: center; gap: 6px; }
+.live-form {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 20; width: 280px;
+  display: grid; gap: 8px; padding: 12px;
+}
+.live-form input { width: 100%; }
+.live-form .actions { display: flex; gap: 8px; }
+.live-error { color: var(--danger); margin: 0; }
 
 /* ---------- Раскладка ---------- */
 

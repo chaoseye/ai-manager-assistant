@@ -13,57 +13,27 @@
 import argparse
 import asyncio
 import difflib
-import getpass
 import re
-import shutil
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
 
-from app.config import BASE_DIR, PROVIDER_IDS, Settings
+from app.config import PROVIDER_IDS, Settings
 from app.core.gateway_llm import list_gateway_models
 from app.core.providers import PROVIDERS
+from app.envfile import ENV_PATH, ensure_env_file, mask, read_secret
+from app.envfile import update_env as _update_env
 
-ENV_PATH = BASE_DIR / ".env"
-ENV_EXAMPLE_PATH = BASE_DIR / ".env.example"
 EXIT_OK = 0
 EXIT_CHECK_FAILED = 1
 EXIT_BAD_INPUT = 2
 _HOST_RE = re.compile(r"[a-z0-9.:-]+")  # имя хоста в ASCII (IDNA) или IP-адрес
 
 
-def mask(secret: str) -> str:
-    return f"{secret[:3]}…{secret[-4:]}" if len(secret) > 10 else "…"
-
-
-def _quote(value: str) -> str:
-    # python-dotenv: без кавычек значение обрезается на « #», а пробелы по краям теряются.
-    if any(ch in value for ch in " #'\"\\") or value != value.strip():
-        return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
-    return value
-
-
 def update_env(path: Path, values: dict[str, str]) -> None:
-    """Заменяет строки KEY=… в .env (первую незакомментированную) или дописывает новые в конец."""
-    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
-    pending = dict(values)
-    for index, line in enumerate(lines):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        key = stripped.split("=", 1)[0].strip()
-        if key.startswith("export "):
-            key = key[len("export ") :].strip()
-        if key in pending:
-            lines[index] = f"{key}={_quote(pending.pop(key))}"
-    if pending:
-        if lines and lines[-1].strip():
-            lines.append("")
-        lines.append("# Шлюз LLM (записано командой python -m app.setup_gateway)")
-        lines += [f"{key}={_quote(value)}" for key, value in pending.items()]
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _update_env(path, values, header="Шлюз LLM (записано командой python -m app.setup_gateway)")
 
 
 def url_problem(url: str) -> str | None:
@@ -83,16 +53,6 @@ def url_problem(url: str) -> str | None:
     if not _HOST_RE.fullmatch(host):
         return f"некорректный адрес «{url}»: в имени хоста недопустимые символы"
     return None
-
-
-def read_key(existing: str | None) -> str | None:
-    """Ключ из stdin (если он перенаправлен) или скрытым вводом. Пустой ввод — оставить сохранённый."""
-    if not sys.stdin.isatty():
-        key = sys.stdin.readline().strip()
-    else:
-        hint = " (Enter — оставить сохранённый)" if existing else ""
-        key = getpass.getpass(f"Ключ шлюза{hint}, ввод скрыт: ").strip()
-    return key or existing
 
 
 def models_report(available: list[str], settings: Settings) -> tuple[list[str], int]:
@@ -134,8 +94,7 @@ def main(argv: list[str] | None = None, *, transport: httpx.AsyncBaseTransport |
             stream.reconfigure(encoding="utf-8")
     args = make_parser().parse_args(argv)
     env_path: Path = args.env_file
-    if not env_path.exists() and ENV_EXAMPLE_PATH.exists() and env_path == ENV_PATH:
-        shutil.copyfile(ENV_EXAMPLE_PATH, env_path)
+    if ensure_env_file(env_path):
         print(f"Создан {env_path.name} из .env.example")
 
     current = Settings(_env_file=env_path if env_path.exists() else None)
@@ -147,7 +106,7 @@ def main(argv: list[str] | None = None, *, transport: httpx.AsyncBaseTransport |
     if problem:
         print(f"Ошибка: {problem}", file=sys.stderr)
         return EXIT_BAD_INPUT
-    key = read_key(current.llm_gateway_key)
+    key = read_secret("Ключ шлюза", current.llm_gateway_key)
     if not key:
         print("Ошибка: ключ не введён", file=sys.stderr)
         return EXIT_BAD_INPUT

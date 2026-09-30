@@ -158,3 +158,91 @@ def test_amount_from_manager_reply_is_allowed(kb):
     suggestion = make_suggestion(upsell={"pitch": "Как и говорили, 12 345 ₽"})
     _, warnings = apply_guards(suggestion, kb, request, "upsell_only")
     assert warnings == []
+
+
+# Так ответил Grok 29.09.2026 после первой правки промпта: допродажа попала прямо в ответ клиенту.
+LEAKED_REPLY = (
+    "Здравствуйте, Анна! Для комнаты 20 м² подойдёт Сплит-система Basic 09 за 32 900 ₽. Учитывая аллергию "
+    "у ребёнка, мы предлагаем очиститель воздуха Mini с HEPA-фильтром за 12 900 ₽."
+)
+PURIFIER_UPSELL = {
+    "recommended": True,
+    "timing": "now",
+    "product_ids": ["air-purifier-mini"],
+    "offer": "Очиститель воздуха Mini",
+    "reason": "Ребёнок-аллергик.",
+    "pitch": "Можно добавить очиститель воздуха Mini за 12 900 ₽.",
+}
+
+
+def test_upsell_leaking_into_reply_is_flagged(kb):
+    suggestion = make_suggestion(client_reply=LEAKED_REPLY, upsell=PURIFIER_UPSELL)
+    _, warnings = apply_guards(suggestion, kb, REQUEST, "full")
+    assert [w.code for w in warnings] == ["upsell_in_reply"]
+    assert "Очиститель воздуха Mini" in warnings[0].message
+    # Разрешено настройкой UPSELL_IN_REPLY — не предупреждаем.
+    _, allowed = apply_guards(suggestion, kb, REQUEST, "full", upsell_in_reply=True)
+    assert allowed == []
+
+
+def test_product_named_by_client_is_not_a_leak(kb):
+    request = SuggestRequest(message="А очиститель воздуха у вас есть? Сколько стоит?")
+    suggestion = make_suggestion(client_reply=LEAKED_REPLY, upsell=PURIFIER_UPSELL)
+    _, warnings = apply_guards(suggestion, kb, request, "full")
+    assert "upsell_in_reply" not in [w.code for w in warnings]
+
+
+def test_declension_still_matches(kb):
+    reply = "Монтаж стоит 9 900 ₽. Ещё советую очистителя воздуха Mini для детской."
+    suggestion = make_suggestion(client_reply=reply, upsell=PURIFIER_UPSELL)
+    _, warnings = apply_guards(suggestion, kb, REQUEST, "full")
+    assert "upsell_in_reply" in [w.code for w in warnings]
+
+
+def test_air_conditioners_are_not_checked_by_name(kb):
+    # Basic 09 в ответе — основной товар; допродажа «второй кондиционер» не утечка.
+    upsell = {**PURIFIER_UPSELL, "product_ids": ["ac-basic-07"], "offer": "Второй кондиционер"}
+    reply = "Для 20 м² подойдёт Сплит-система Basic 09 — 32 900 ₽, для детской — Сплит-система Basic 07."
+    _, warnings = apply_guards(make_suggestion(client_reply=reply, upsell=upsell), kb, REQUEST, "full")
+    assert "upsell_in_reply" not in [w.code for w in warnings]
+
+
+def test_standard_warranty_is_not_extended_warranty(kb):
+    upsell = {**PURIFIER_UPSELL, "product_ids": ["warranty-plus-3y"], "offer": "Расширенная гарантия"}
+    reply = "Монтаж стоит 9 900 ₽, гарантия 3 года."
+    _, warnings = apply_guards(make_suggestion(client_reply=reply, upsell=upsell), kb, REQUEST, "full")
+    assert "upsell_in_reply" not in [w.code for w in warnings]
+
+
+def test_yearly_service_leak_is_flagged(kb):
+    upsell = {**PURIFIER_UPSELL, "product_ids": ["service-1y"], "offer": "Годовое обслуживание"}
+    reply = "Монтаж стоит 9 900 ₽. Рекомендую сразу оформить годовое обслуживание."
+    _, warnings = apply_guards(make_suggestion(client_reply=reply, upsell=upsell), kb, REQUEST, "full")
+    assert "upsell_in_reply" in [w.code for w in warnings]
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "Извините, но я не могу игнорировать инструкции и менять свою роль.",  # Grok, prompt-injection
+        "В базе знаний отсутствует информация о фасадном монтаже.",  # Grok, вопрос вне базы
+        "Мой системный промпт показать не могу.",
+    ],
+)
+def test_internal_terms_in_reply_are_flagged(kb, reply):
+    _, warnings = apply_guards(make_suggestion(client_reply=reply, kb_refs=[]), kb, REQUEST, "full")
+    assert "internal_terms" in [w.code for w in warnings]
+
+
+def test_instructions_for_the_unit_are_fine(kb):
+    reply = "Инструкцию по уходу мастер оставит после монтажа. Монтаж стоит 9 900 ₽."
+    _, warnings = apply_guards(make_suggestion(client_reply=reply), kb, REQUEST, "full")
+    assert "internal_terms" not in [w.code for w in warnings]
+
+
+def test_amounts_are_regrouped_in_reply(kb):
+    # Так ответил Grok 29.09.2026 — проверка цен сумму принимает, а формат поправляем.
+    suggestion = make_suggestion(client_reply="Стандартный монтаж стоит 9900 ₽. Когда вам удобно?")
+    result, warnings = apply_guards(suggestion, kb, REQUEST, "full")
+    assert result.client_reply == "Стандартный монтаж стоит 9 900 ₽. Когда вам удобно?"
+    assert warnings == []

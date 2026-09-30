@@ -57,7 +57,7 @@ POST /api/v1/suggest ┘
 | Демо-страница | Jinja2 + vanilla JS, без сборки |
 | Тесты | pytest, pytest-asyncio |
 | Линтер и форматирование | ruff |
-| Запуск | Docker + docker-compose; для вебхуков из живого amoCRM — HTTPS-туннель (ngrok или cloudflared). Онлайн-демо — Vercel: всё приложение одной функцией, mock-режим |
+| Запуск | Docker + docker-compose; для вебхуков из живого amoCRM — HTTPS-туннель (cloudflared, а если туннели Cloudflare блокирует провайдер — SSH-туннель pinggy). Онлайн-демо — Vercel: всё приложение одной функцией, mock-режим |
 | Проверка JWT виджета и Salesbot (этап 3) | PyJWT |
 | Похожесть текстов для автооценки черновиков (этап 3) | rapidfuzz |
 
@@ -72,6 +72,7 @@ Testovoe_O_Complex/
 │   ├── scenarios.py             # сценарии демо и имитатора (examples/scenarios)
 │   ├── cli.py                   # CLI-скрипт (F-01)
 │   ├── setup_gateway.py         # адрес и ключ шлюза LLM в .env с проверкой ключа и моделей
+│   ├── envfile.py               # запись в .env и скрытый ввод секретов для команд подключения
 │   ├── core/
 │   │   ├── assistant.py         # Assistant: подготовка запроса → LLM с повторами → проверки → результат
 │   │   ├── prompts.py           # системный промпт, user-сообщение, защита тегов разметки
@@ -96,6 +97,7 @@ Testovoe_O_Complex/
 │   │   ├── fake.py              # поддельный сервер amoCRM для mock-режима и тестов
 │   │   ├── factory.py           # сборка клиента по настройкам, проверка токена
 │   │   ├── simulate.py          # консольный имитатор amoCRM
+│   │   ├── connect.py           # подключение живого аккаунта: адрес и токен в .env с проверкой токена
 │   │   └── setup_webhook.py     # регистрация вебхука в живом amoCRM
 │   ├── worker/
 │   │   └── processor.py         # Inbox (приём) и Worker (очередь): пауза, stale, повторы, публикация
@@ -110,6 +112,7 @@ Testovoe_O_Complex/
 │   │   ├── health.py            # GET /health
 │   │   ├── demo.py              # GET / и /amocrm (страницы), GET /api/v1/demo/scenarios
 │   │   ├── llm.py               # GET /api/v1/llm/providers — модели и их состояние
+│   │   ├── live.py              # живая модель за паролем: POST /api/v1/live/login, X-Live-Password
 │   │   ├── webhooks.py          # POST /webhooks/amocrm/{secret}
 │   │   ├── amocrm_mock.py       # /api/v1/amocrm-mock: notes, leads, feed, messages (только mock-режим)
 │   │   ├── widget.py            # GET /api/v1/leads/{id}/suggestion, regenerate (этап 3)
@@ -152,7 +155,7 @@ Testovoe_O_Complex/
 | `core/gateway_llm.py` | `GatewayLLMClient`: `POST {LLM_GATEWAY_URL}/chat/completions`, схема ответа и в `response_format`, и в системном промпте; упрощение запроса на 400 (без рассуждений → `json_object` → без формата) с запоминанием; повторы на 429/5xx/сетевых ошибках; ошибки ключа, баланса, модели и адреса — без повторов, с подсказкой настройки; разбор `finish_reason` до текста, извлечение JSON из `<think>` и ```` ``` ````, `usage` в формате Anthropic | httpx, `providers`, `llm` |
 | `core/llm_registry.py` | `build_llms()`: в mock-режиме на все модели отвечает `MockLLMClient`; в live — Claude через Anthropic API (если есть ключ или шлюз не настроен), остальные через шлюз. `LLMRegistry`: модель по умолчанию, запасные (`chain()`), `describe()` для API и страницы, `check_gateway()` — при старте отмечает недоступными модели, которых нет в `GET /models` шлюза | `llm`, `gateway_llm`, `mock_llm` |
 | `core/mock_llm.py` | Ответ по совпадению текста обращения с записью из `examples/mock_llm/`, иначе — по похожему вопросу FAQ, иначе — «уточню» с `needs_human` | `llm`, `kb` |
-| `core/guards.py` | Проверки из [FUNCTIONALITY.md, 3.7](FUNCTIONALITY.md#37-проверки-результата-f-06): суммы, ссылки, товары, допродажа при жалобе, стоп-фразы, длина | `kb`, `money` |
+| `core/guards.py` | Проверки из [FUNCTIONALITY.md, 3.7](FUNCTIONALITY.md#37-проверки-результата-f-06): суммы и их формат, ссылки, товары, допродажа при жалобе и в ответе клиенту, внутренние термины, стоп-фразы, длина | `kb`, `money` |
 | `core/money.py` | `format_rub()` и `extract_amounts()` — суммы только с явной валютой (₽, руб., р.) | — |
 | `core/pii.py` | Маскирование телефонов (РФ и международных), e-mail, номеров карт (с проверкой Луна) | — |
 | `kb/models.py` | Схемы записей БЗ, `KnowledgeBase` с индексами | — |
@@ -164,7 +167,7 @@ Testovoe_O_Complex/
 | `amocrm/fake.py` | Поддельный amoCRM: маршруты API v4 в формате документации, проверка токена, 204 для ненайденного, 400 при примечании к несуществующей сущности; примечания хранит в памяти | httpx |
 | `amocrm/factory.py` | Клиент по `AMOCRM_MODE`: `live` — настоящий API, `mock` — поверх поддельного сервера; проверка токена при старте | `client`, `fake` |
 | `amocrm/payloads.py` | Сообщение и тело вебхука в формате amoCRM — общие для имитатора и страницы «amoCRM (mock)» | `webhooks` |
-| `amocrm/simulate.py`, `amocrm/setup_webhook.py` | Консольные инструменты: имитатор вебхуков и регистрация вебхука в живом amoCRM | `payloads`, `factory` |
+| `amocrm/simulate.py`, `amocrm/setup_webhook.py`, `amocrm/connect.py` | Консольные инструменты: имитатор вебхуков, регистрация вебхука в живом amoCRM (с проверкой адреса через `/health` и пустую посылку, повтором при «Invalid URL»), подключение аккаунта (адрес и токен в `.env`, проверка токена через `GET /api/v4/account`, `AMOCRM_ACCOUNT_ID`, случайный `WEBHOOK_SECRET`) | `payloads`, `factory`, `envfile` |
 | `worker/processor.py` | `Inbox.ingest()`: запись сообщений и постановка задач (пауза перед генерацией). `Worker`: фоновый цикл, задачи с `run_at ≤ now` (до `WORKER_CONCURRENCY` одновременно), выбор `full` / `upsell_only` / `skip`, контекст, ядро, проверка на устаревание, публикация, повторы, примечание о сбое, очистка по сроку хранения | `core`, `amocrm`, `storage` |
 | `storage/db.py`, `storage/repo.py` | Схема SQLite, операции с `suggestions`, `dialogs`, `messages`, `jobs`, очистка | `aiosqlite` |
 | `scenarios.py` | Модель и загрузка сценариев (без FastAPI и SDK — её импортирует имитатор) | `core/schemas` |
@@ -209,6 +212,7 @@ Testovoe_O_Complex/
 | Метод | Путь | Доступ | Назначение |
 |---|---|---|---|
 | POST | `/api/v1/suggest` | Открыт; если задан `API_TOKEN` — `Authorization: Bearer` | Ядро: обращение → два блока. `?provider=claude\|glm\|deepseek\|kimi\|qwen\|grok` — выбрать модель (без запасных); без параметра — `LLM_PROVIDER` и запасные |
+| POST | `/api/v1/live/login` | Открыт; включён, только если задан `LIVE_DEMO_PASSWORD` и `LLM_MODE=mock` | `{password}` → `{default, providers}` или `401` (неверный пароль), `429` (5 неверных за 10 минут с одного адреса), `404` (живое демо выключено). С верным паролем в заголовке `X-Live-Password` запрос `/api/v1/suggest` уходит в живые модели; `429` — исчерпан `LIVE_DEMO_DAILY_LIMIT` |
 | GET | `/api/v1/llm/providers` | Как у `/suggest` | Модели для переключения: `{mode, default, fallbacks, gateway_check, providers: [{id, name, model, route, available, problem, default}]}`; `gateway_check` — `ok`, текст ошибки проверки шлюза или `null` |
 | GET | `/api/v1/suggestions/{id}` | Как у `/suggest` | Сохранённый результат с замаскированным запросом |
 | GET | `/api/v1/kb` | `ADMIN_TOKEN`, если задан | Версия и содержимое БЗ |
@@ -436,6 +440,8 @@ id всех записей — латиница в kebab-case, уникальн�
 | `LLM_MAX_TOKENS` | `8000` | Лимит вывода, включая рассуждения; при обрезке — один повтор с удвоенным лимитом |
 | `LLM_TIMEOUT_SECONDS` | `60` | Таймаут запроса к LLM (SDK и клиент шлюза повторяют ещё до 2 раз) |
 | `LLM_FALLBACKS` | `true` | Серверный fallback Anthropic API при отказе модели |
+| `LIVE_DEMO_PASSWORD` | — | Живая модель за паролем на стенде в mock-режиме: без пароля — записанные ответы, с паролем на странице — живые модели (нужен шлюз или ключ Anthropic) |
+| `LIVE_DEMO_DAILY_LIMIT` | `200` | Живых запросов в сутки на экземпляр сервиса (на Vercel экземпляров может быть несколько — это страховка; точный предел — квота ключа в шлюзе) |
 | `LLM_GATEWAY_URL` | — | Адрес OpenAI-совместимого API шлюза, обычно `https://<шлюз>/v1`. Задаётся командой `python -m app.setup_gateway` |
 | `LLM_GATEWAY_KEY` | — | Ключ шлюза |
 | `LLM_GATEWAY_MODEL_CLAUDE` … `_GROK` | `claude-opus-5`, `glm-5.3`, `deepseek-v4-pro`, `kimi-k3`, `qwen3.8-max`, `grok-4.7` | id моделей в шлюзе (по умолчанию — как в New API) |
@@ -486,6 +492,7 @@ tests/
 ├── test_llm_registry.py           # реестр, маршруты, запасные модели, ?provider=, /api/v1/llm/providers, выбор на странице
 ├── test_setup_gateway.py          # команда подключения шлюза: .env, проверка ключа, подсказки по моделям
 ├── test_record_scenarios.py       # запись ответов на сценарии: запрос как на странице, отбор по проверкам
+├── test_live_demo.py              # живая модель за паролем: вход, выбор ассистента, подбор пароля, лимит, страница
 ├── test_mock_llm_and_scenarios.py # ответы mock проходят проверки, сценарии end-to-end, FAQ, лёгкие импорты
 ├── test_api.py                    # эндпоинты, токены, коды ошибок, сохранение, перезагрузка БЗ
 ├── test_cli.py                    # текстовый и JSON-вывод, stdin, коды возврата, --provider
@@ -494,7 +501,8 @@ tests/
 ├── test_amocrm_client.py          # клиент против поддельного сервера: чтение, кэш, примечания, повторы, лимит; контекст
 ├── test_worker.py                 # очередь: пауза, дубли, режимы, stale, вложения, повторы, сбои, перезапуск, очистка
 ├── test_webhook_api.py            # вебхук по HTTP, health, настройки; API и страница «amoCRM (mock)»
-└── test_amocrm_tools.py           # имитатор end-to-end через TestClient, регистрация вебхука
+├── test_amocrm_tools.py           # имитатор end-to-end через TestClient, регистрация вебхука
+└── test_amocrm_connect.py         # подключение аккаунта: разбор адреса, проверка токена, запись в .env
 evals/
 ├── cases.yaml                     # 31 кейс: вход + ожидаемые свойства результата
 ├── run_eval.py                    # прогон, проверки, метрики, стоимость, отчёт, --provider (all — сравнение), --record

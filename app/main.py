@@ -1,5 +1,6 @@
 """Сборка FastAPI-приложения."""
 
+import logging
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -12,9 +13,10 @@ from fastapi.staticfiles import StaticFiles
 from app import __version__
 from app.amocrm.client import AmoClient
 from app.amocrm.factory import build_amo_client, check_amocrm
-from app.api import amocrm_mock, demo, health, kb, suggest, webhooks
+from app.api import amocrm_mock, demo, health, kb, live, suggest, webhooks
 from app.api import llm as llm_api
 from app.api.errors import register_error_handlers
+from app.api.live import LiveDemo
 from app.config import Settings, get_settings
 from app.core.assistant import Assistant
 from app.core.llm import LLMClient
@@ -26,19 +28,40 @@ from app.storage.repo import DialogRepo, JobRepo, SuggestionRepo
 from app.worker.processor import Inbox, Worker
 
 STATIC_DIR = Path(__file__).resolve().parent / "web" / "static"
+logger = logging.getLogger(__name__)
 
 
 class ConfigError(RuntimeError):
     pass
 
 
+async def _live_demo(
+    settings: Settings, kb_store: KnowledgeStore, live_llm: LLMRegistry | None
+) -> LiveDemo | None:
+    """Живая модель за паролем: только на стенде в mock-режиме и только если задан пароль."""
+    if settings.llm_mode != "mock" or not settings.live_demo_password:
+        return None
+    live_settings = settings.model_copy(update={"llm_mode": "live"})
+    llms = live_llm
+    if llms is None:
+        llms = build_llms(live_settings)
+        await llms.check_gateway(live_settings)
+    if all(item["available"] is False for item in llms.describe()):
+        logger.warning("live_demo_disabled", extra={"fields": {"reason": "ни одна модель не настроена"}})
+        return None
+    assistant = Assistant(kb_store, llms, live_settings)
+    return LiveDemo(settings.live_demo_password, assistant, settings.live_demo_daily_limit)
+
+
 def create_app(
     settings: Settings | None = None,
     *,
     llm: LLMRegistry | LLMClient | None = None,
+    live_llm: LLMRegistry | None = None,
     amo_transport: httpx.AsyncBaseTransport | None = None,
 ) -> FastAPI:
-    """settings, llm (реестр моделей или один клиент) и транспорт amoCRM можно подменить в тестах."""
+    """settings, llm (реестр моделей или один клиент), live_llm (модели для живого демо за паролем)
+    и транспорт amoCRM можно подменить в тестах."""
     settings = settings or get_settings()
 
     @asynccontextmanager
@@ -61,6 +84,7 @@ def create_app(
         app.state.kb_store = kb_store
         app.state.assistant = assistant
         app.state.repo = suggestions
+        app.state.live_demo = await _live_demo(settings, kb_store, live_llm)
         app.state.inbox = app.state.worker = app.state.jobs = app.state.dialogs = app.state.fake_amo = None
         app.state.amocrm_problem = None
 
@@ -117,6 +141,7 @@ def create_app(
 
     app.include_router(suggest.router)
     app.include_router(llm_api.router)
+    app.include_router(live.router)
     app.include_router(kb.router)
     app.include_router(health.router)
     app.include_router(demo.router)

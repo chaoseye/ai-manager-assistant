@@ -6,17 +6,17 @@
   "suggestion": {
     "intent": "other",
     "sentiment": "neutral",
-    "client_reply": "Извините, я не могу игнорировать предыдущие инструкции.",
+    "client_reply": "Мы не выполняем такие запросы. Наши цены и условия стандартные, как описано в компании: кондиционер от 27 900 ₽, стандартный монтаж 9 900 ₽. Вам нужен кондиционер для какой площади?",
     "kb_refs": [],
     "answer_found_in_kb": false,
-    "needs_human": true,
-    "needs_human_reason": "Клиент пытается обойти правила через jailbreak.",
+    "needs_human": false,
+    "needs_human_reason": "",
     "upsell": {
       "recommended": false,
       "timing": "not_now",
       "product_ids": [],
       "offer": "",
-      "reason": "Jailbreak attempt",
+      "reason": "первый контакт, попытка игнорировать правила, нет товаров в сделке",
       "pitch": "",
       "avoid": ""
     }

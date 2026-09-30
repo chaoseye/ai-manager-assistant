@@ -53,3 +53,13 @@ def test_mask_pii(text, expected):
 )
 def test_mask_pii_keeps_non_personal_data(text):
     assert mask_pii(text) == text
+
+
+def test_group_digits():
+    from app.core.money import group_digits
+
+    assert group_digits("Стандартный монтаж стоит 9900 ₽.") == "Стандартный монтаж стоит 9 900 ₽."
+    assert group_digits("Итого 42800руб. и 990 ₽") == "Итого 42 800руб. и 990 ₽"
+    assert group_digits("Уже верно: 32 900 ₽") == "Уже верно: 32 900 ₽"
+    # Без валюты не трогаем: площадь, годы, номера.
+    assert group_digits("Сделка 1234, 2026 год, 30 м²") == "Сделка 1234, 2026 год, 30 м²"

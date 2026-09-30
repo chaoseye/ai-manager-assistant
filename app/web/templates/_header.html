@@ -8,7 +8,27 @@
   </div>
   <div class="badges">
     {% if llm_mode == "mock" %}
-      <span class="badge badge-warn" title="Ответы записаны заранее или найдены по FAQ; модель не вызывается">LLM: mock</span>
+      <span class="badge badge-warn" id="llm-badge" title="Ответы записаны заранее или найдены по FAQ; модель не вызывается">LLM: mock</span>
+      {% if active == "direct" and live_demo %}
+      <div class="live-demo" id="live-demo">
+        <button type="button" class="btn btn-small" id="live-open" aria-expanded="false" aria-controls="live-form">Живая модель…</button>
+        <form class="live-form card" id="live-form" hidden>
+          <label for="live-password" class="small">Пароль живой модели</label>
+          <input id="live-password" type="password" autocomplete="current-password" required>
+          <p class="small muted">Ответы будет готовить настоящая модель — это платно для владельца стенда.</p>
+          <p class="small live-error" id="live-error" role="alert" hidden></p>
+          <div class="actions">
+            <button type="submit" class="btn btn-primary">Войти</button>
+            <button type="button" class="btn btn-ghost" id="live-cancel">Отмена</button>
+          </div>
+        </form>
+        <label class="badge badge-ok badge-select" id="live-picker" title="Живая модель: ответы генерируются сейчас" hidden>
+          <span>LLM:</span>
+          <select id="llm-provider" aria-label="Модель для подсказок"></select>
+        </label>
+        <button type="button" class="btn btn-ghost btn-small" id="live-logout" hidden>Выйти</button>
+      </div>
+      {% endif %}
     {% elif active == "direct" %}
       <label class="badge badge-ok badge-select" title="Модель для следующих подсказок">
         <span>LLM:</span>

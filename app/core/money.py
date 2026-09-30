@@ -19,6 +19,15 @@ def format_rub(value: int) -> str:
     return f"{value:,}".replace(",", " ") + " ₽"
 
 
+_UNGROUPED_RE = re.compile(rf"(?<![\d.,])(\d{{4,}})(?={_SEP}?(?:₽|руб|р\.))", re.IGNORECASE)
+
+
+def group_digits(text: str) -> str:
+    """«9900 ₽» -> «9 900 ₽»: суммы из четырёх и более цифр подряд перед валютой получают пробелы
+    между разрядами, как требует тон. Числа без валюты не трогаем."""
+    return _UNGROUPED_RE.sub(lambda m: f"{int(m.group(1)):,}".replace(",", " "), text)
+
+
 def extract_amounts(text: str) -> list[tuple[str, float]]:
     """Все суммы в рублях из текста: [(как написано, значение)]."""
     amounts: list[tuple[str, float]] = []

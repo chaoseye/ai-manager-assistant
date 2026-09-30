@@ -66,7 +66,9 @@ class Assistant:
             max_tokens=self.settings.llm_max_tokens,
         )
         used, llm, response, attempts, usage, notes = await self._generate_with_fallbacks(call, provider)
-        suggestion, warnings = apply_guards(response.suggestion, kb, prepared, mode)
+        suggestion, warnings = apply_guards(
+            response.suggestion, kb, prepared, mode, upsell_in_reply=self.settings.upsell_in_reply
+        )
         warnings = notes + warnings
 
         meta = Meta(

@@ -49,6 +49,7 @@ def _page_context(request: Request, active: str) -> dict[str, object]:
         "amocrm_mode": state.settings.amocrm_mode,
         "debounce_seconds": state.settings.debounce_seconds,
         "static_version": STATIC_VERSION,
+        "live_demo": getattr(state, "live_demo", None) is not None,
     }
 
 

@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     # Демо и mock-режим
     mock_llm_dir: Path = Path("examples/mock_llm")
     scenarios_dir: Path = Path("examples/scenarios")
+    # Живая модель за паролем на публичном стенде: при LLM_MODE=mock все видят записанные ответы,
+    # а кто ввёл пароль на странице — ответы живых моделей (нужен шлюз или ключ Anthropic).
+    live_demo_password: str | None = None
+    live_demo_daily_limit: int = 200  # живых запросов в сутки на один экземпляр сервиса
 
     # Доступ к API
     api_token: str | None = None
@@ -98,6 +102,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "anthropic_api_key",
+        "live_demo_password",
         "llm_gateway_url",
         "llm_gateway_key",
         "api_token",
