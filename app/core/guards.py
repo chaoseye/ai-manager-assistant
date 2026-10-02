@@ -352,6 +352,28 @@ def _named_in(text_stems: set[str], distinctive: list[str], *, loose: bool = Fal
     return loose or len(set(distinctive) & text_stems) >= min(2, len(distinctive))
 
 
+def _plain(text: str) -> str:
+    """Регистр, «ё», знаки препинания и любые пробелы (неразрывные, переносы строк) не важны."""
+    return " ".join(_WORD_RE.findall(text.lower().replace("ё", "е")))
+
+
+def _deal_product_ids(products: list[str], kb: KnowledgeBase) -> set[str]:
+    """Товары сделки как id из БЗ. Сценарии демо передают id, а amoCRM — названия элементов каталога:
+    их узнаём по названию товара в БЗ или по его отличительным словам («Монтаж стандартный»)."""
+    by_name = {_plain(p.name): p.id for p in kb.products}
+    distinctive = _distinctive_stems(kb)
+    found: set[str] = set()
+    for item in products:
+        if item in kb.products_by_id:
+            found.add(item)
+        elif _plain(item) in by_name:
+            found.add(by_name[_plain(item)])
+        else:
+            stems = _stems(item)
+            found |= {pid for pid, words in distinctive.items() if _named_in(stems, words)}
+    return found
+
+
 def _terms_message(kind: str, raw: str, where: str) -> str:
     if kind == "percent":
         return f"Процент «{raw}» в {where} не из базы знаний — проверьте, не обещана ли скидка, которой нет."
@@ -418,7 +440,7 @@ def apply_guards(
         distinctive = _distinctive_stems(kb)
         reply_stems = _stems(result.client_reply)
         context_stems = _stems(" ".join([request.message, *(m.text for m in request.history)]))
-        in_deal = set(request.lead.products) if request.lead else set()
+        in_deal = _deal_product_ids(request.lead.products, kb) if request.lead else set()
         for pid in upsell.product_ids:
             product = kb.products_by_id[pid]
             if pid in in_deal or _named_in(context_stems, distinctive[pid], loose=True):
@@ -430,8 +452,10 @@ def apply_guards(
                     "предлагать его или нет, решает менеджер.",
                 )
 
-    # Допродажа при жалобе или негативе.
-    if (result.sentiment == "negative" or result.intent == "complaint") and upsell.timing == "now":
+    # Допродажа при жалобе или негативе — «не предлагать» (правило допродаж 3): и «сейчас», и «после решения
+    # вопроса» модель иногда ставит вместо отказа.
+    complaint = result.sentiment == "negative" or result.intent == "complaint"
+    if complaint and upsell.timing in ("now", "after_resolution"):
         upsell.timing = "not_now"
         warn("upsell_on_complaint", "Клиент недоволен — допродажа перенесена в «не предлагать сейчас».")
 
@@ -498,11 +522,12 @@ def apply_guards(
             f"Ответ клиенту упоминает внутреннее устройство помощника («{internal.group(0)}») — перепишите.",
         )
 
-    # Запрещённые фразы.
+    # Запрещённые фразы: «найдете» вместо «найдёте» и неразрывный пробел их не прячут. Фраза начинается
+    # с начала слова, а конец может быть другим: «как я уже говорил» ловит и «…говорила».
     for label, text in (("ответе клиенту", result.client_reply), ("фразе допродажи", upsell.pitch)):
-        lowered = text.lower()
+        plain = f" {_plain(text)}"
         for phrase in kb.forbidden_phrases:
-            if phrase.lower() in lowered:
+            if f" {_plain(phrase)}" in plain:
                 warn("forbidden_phrase", f"Запрещённая фраза «{phrase}» в {label}.")
 
     if len(result.client_reply) > MAX_REPLY_CHARS:

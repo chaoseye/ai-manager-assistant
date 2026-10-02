@@ -251,13 +251,11 @@ def test_hallucinated_extra_fee_in_total_is_flagged(kb):
 # ---------- Стоп-фразы, жалоба, товары сделки ----------
 
 
-@pytest.mark.xfail(strict=True, reason="стоп-фраза с «е» вместо «ё» не находится")
 def test_forbidden_phrase_without_yo(kb):
     _, warnings = apply_guards(make_suggestion(client_reply="Дешевле нигде не найдете!"), kb, REQUEST, "full")
     assert "forbidden_phrase" in codes(warnings)
 
 
-@pytest.mark.xfail(strict=True, reason="стоп-фраза с неразрывным пробелом не находится")
 def test_forbidden_phrase_with_nbsp(kb):
     _, warnings = apply_guards(
         make_suggestion(client_reply="Уважаемый клиент, монтаж 9 900 ₽."), kb, REQUEST, "full"
@@ -265,9 +263,6 @@ def test_forbidden_phrase_with_nbsp(kb):
     assert "forbidden_phrase" in codes(warnings)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="при жалобе timing=after_resolution не переводится в not_now (правило 7)"
-)
 def test_complaint_with_after_resolution_becomes_not_now(kb):
     suggestion = make_suggestion(
         intent="complaint",
@@ -279,11 +274,56 @@ def test_complaint_with_after_resolution_becomes_not_now(kb):
             "pitch": "x",
         },
     )
-    result, _ = apply_guards(suggestion, kb, REQUEST, "full")
+    result, warnings = apply_guards(suggestion, kb, REQUEST, "full")
     assert result.upsell.timing == "not_now"
+    assert "upsell_on_complaint" in codes(warnings)
 
 
-@pytest.mark.xfail(strict=True, reason="amoCRM передаёт товары сделки названиями, а проверка сравнивает с id")
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "ДЕШЕВЛЕ НИГДЕ НЕ НАЙДЁТЕ",
+        "Дешевле нигде не найдёте, честно.",
+        "Как я уже говорила, монтаж — 9 900 ₽.",  # окончание другое, фраза та же
+        "Это\nне наша проблема, но поможем.",  # перенос строки внутри фразы
+    ],
+)
+def test_forbidden_phrase_variants(kb, reply):
+    _, warnings = apply_guards(make_suggestion(client_reply=reply), kb, REQUEST, "full")
+    assert "forbidden_phrase" in codes(warnings)
+
+
+@pytest.mark.parametrize(
+    "products",
+    [
+        ["service-1y"],  # id, как в сценариях демо
+        ["Годовое обслуживание: 2 чистки фильтров и теплообменника"],  # название из каталога amoCRM
+        ["годовое обслуживание (2 чистки фильтров и теплообменника)"],  # другие регистр и знаки
+        ["Обслуживание годовое"],  # свои слова в каталоге: узнаём по отличительным словам
+    ],
+)
+def test_product_in_deal_by_id_or_name_is_not_a_leak(kb, products):
+    request = SuggestRequest(message="Когда приедете на чистку?", lead=LeadContext(products=products))
+    suggestion = make_suggestion(
+        client_reply="Годовое обслуживание у вас уже оплачено, мастер приедет на чистку в удобный день.",
+        upsell={"recommended": True, "timing": "now", "product_ids": ["service-1y"], "pitch": "x"},
+    )
+    _, warnings = apply_guards(suggestion, kb, request, "full")
+    assert "upsell_in_reply" not in codes(warnings)
+
+
+def test_other_product_in_deal_does_not_hide_a_leak(kb):
+    request = SuggestRequest(
+        message="Когда приедете?", lead=LeadContext(products=["Сплит-система Basic 09", "Стандартный монтаж"])
+    )
+    suggestion = make_suggestion(
+        client_reply="Приедем завтра. Кстати, годовое обслуживание с монтажом — со скидкой 20%.",
+        upsell={"recommended": True, "timing": "now", "product_ids": ["service-1y"], "pitch": "x"},
+    )
+    _, warnings = apply_guards(suggestion, kb, request, "full")
+    assert "upsell_in_reply" in codes(warnings)
+
+
 def test_product_in_deal_by_name_is_not_a_leak(kb):
     # app/amocrm/context.py кладёт в lead.products названия элементов каталога, а сценарии демо — id.
     lead = LeadContext(products=["Годовое обслуживание: 2 чистки фильтров и теплообменника"])
