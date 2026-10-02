@@ -24,11 +24,13 @@ _HTTP_CODES = {
 }
 
 
-def error_response(status: int, code: str, message: str, details: Any = None) -> JSONResponse:
+def error_response(
+    status: int, code: str, message: str, details: Any = None, headers: dict[str, str] | None = None
+) -> JSONResponse:
     body: dict[str, Any] = {"code": code, "message": message}
     if details is not None:
         body["details"] = jsonable_encoder(details)
-    return JSONResponse(status_code=status, content={"error": body})
+    return JSONResponse(status_code=status, content={"error": body}, headers=headers)
 
 
 def register_error_handlers(app: FastAPI) -> None:
@@ -39,7 +41,8 @@ def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(StarletteHTTPException)
     async def _http(_: Request, exc: StarletteHTTPException) -> JSONResponse:
         code = _HTTP_CODES.get(exc.status_code, "http_error")
-        return error_response(exc.status_code, code, str(exc.detail))
+        # Заголовки исключения (WWW-Authenticate у 401, Allow у 405) не теряем.
+        return error_response(exc.status_code, code, str(exc.detail), headers=exc.headers)
 
     @app.exception_handler(KBValidationError)
     async def _kb(_: Request, exc: KBValidationError) -> JSONResponse:

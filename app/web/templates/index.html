@@ -51,6 +51,12 @@
 
     <div class="tab-panel" id="tab-suggestion" role="tabpanel">
       <div id="status" class="status muted">Подсказка появится после сообщения клиента.</div>
+      <form id="api-token-form" class="form token-form" data-required="{{ '1' if api_token_required else '' }}" hidden>
+        <p class="small muted">Сервис защищён токеном. Введите API_TOKEN — он хранится только до закрытия вкладки.</p>
+        <label>API_TOKEN <input name="token" type="password" autocomplete="off" required></label>
+        <p class="small live-error" id="api-token-error" role="alert" hidden></p>
+        <div class="actions"><button type="submit" class="btn btn-primary">Продолжить</button></div>
+      </form>
       <div id="stale" class="banner" hidden>Менеджер уже ответил — подсказка относится к предыдущему сообщению клиента.</div>
 
       <div id="suggestion" hidden>

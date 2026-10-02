@@ -41,15 +41,31 @@ def test_lockout_cannot_be_bypassed_with_forwarded_for(stand):
     assert 429 in statuses
 
 
-@pytest.mark.xfail(strict=True, reason="при API_TOKEN демо-страница не может вызвать /api/v1/suggest")
 def test_demo_page_can_send_api_token(tmp_path):
     with TestClient(create_app(make_settings(tmp_path, api_token="t0ken"))) as client:
-        assert client.get("/").status_code == 200
+        html = client.get("/").text
         js = client.get("/static/app.js").text
         unauthorized = client.post("/api/v1/suggest", json=BODY)
-    # Страница должна уметь отправить токен, а ответ 401 — сказать, что нужен именно он.
+        authorized = client.post("/api/v1/suggest", json=BODY, headers={"Authorization": "Bearer t0ken"})
+    # Страница сразу спрашивает токен и отправляет его, а 401 говорит, что нужен именно токен.
+    assert 'id="api-token-form"' in html and 'data-required="1"' in html
     assert "Authorization" in js
-    assert unauthorized.headers.get("www-authenticate") == "Bearer"
+    assert unauthorized.status_code == 401 and unauthorized.headers.get("www-authenticate") == "Bearer"
+    assert authorized.status_code == 200
+
+
+def test_open_service_does_not_ask_for_token(client):
+    assert 'data-required=""' in client.get("/").text
+
+
+def test_wrong_live_password_is_not_a_token_error(stand):
+    response = stand.post("/api/v1/suggest", json=BODY, headers={"X-Live-Password": "guess"})
+    assert response.status_code == 401 and "www-authenticate" not in response.headers
+
+
+def test_error_handler_keeps_exception_headers(client):
+    # До исправления обработчик ошибок терял заголовки: у 405 пропадал Allow.
+    assert "POST" in client.get("/api/v1/suggest").headers.get("allow", "")
 
 
 @pytest.mark.xfail(

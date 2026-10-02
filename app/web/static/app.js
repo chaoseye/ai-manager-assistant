@@ -25,6 +25,7 @@ const state = {
   suggestionForIndex: -1,
   kbLoaded: false,
   livePassword: null, // пароль живой модели на стенде в mock-режиме (только до закрытия вкладки)
+  apiToken: null,     // API_TOKEN, если сервис защищён им (только до закрытия вкладки)
 };
 
 function setStatus(text, kind = "") {
@@ -174,6 +175,7 @@ async function requestSuggestion() {
     : "/api/v1/suggest";
   const headers = { "Content-Type": "application/json" };
   if (state.livePassword) headers["X-Live-Password"] = state.livePassword;
+  if (state.apiToken) headers.Authorization = `Bearer ${state.apiToken}`;
   try {
     const response = await fetch(url, {
       method: "POST",
@@ -183,6 +185,13 @@ async function requestSuggestion() {
     });
     const data = await response.json().catch(() => null);
     if (seq !== state.requestSeq) return;
+    // 401 с WWW-Authenticate — сервис ждёт API_TOKEN; без него — неверный пароль живой модели.
+    if (response.status === 401 && response.headers.get("WWW-Authenticate")) {
+      const wrong = Boolean(state.apiToken);
+      setApiToken(null);
+      showApiTokenForm(wrong ? "Токен не подошёл — проверьте API_TOKEN." : "");
+      return;
+    }
     if (response.status === 401 && state.livePassword) {
       liveLogout();
       setStatus("Пароль живой модели больше не действует — войдите снова.", "error");
@@ -376,6 +385,39 @@ async function reloadKb() {
   $("kb-status").textContent = result.changed ? `Загружена новая версия ${result.version}` : `Без изменений (${result.version})`;
 }
 
+// ---------- API_TOKEN ----------
+
+function setApiToken(token) {
+  state.apiToken = token;
+  try {
+    if (token) sessionStorage.setItem("apiToken", token);
+    else sessionStorage.removeItem("apiToken");
+  } catch { /* хранилище недоступно */ }
+}
+
+function showApiTokenForm(error = "") {
+  $("api-token-form").hidden = false;
+  $("api-token-error").textContent = error;
+  $("api-token-error").hidden = !error;
+  setStatus("Чтобы получить подсказку, введите API_TOKEN.", "muted");
+  $("api-token-form").elements.token.focus();
+}
+
+function initApiToken() {
+  try { state.apiToken = sessionStorage.getItem("apiToken"); } catch { /* хранилище недоступно */ }
+  const form = $("api-token-form");
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const token = form.elements.token.value.trim();
+    form.elements.token.value = "";
+    if (!token) return;
+    setApiToken(token);
+    form.hidden = true;
+    requestSuggestion();
+  });
+  if (form.dataset.required && !state.apiToken) showApiTokenForm();
+}
+
 // ---------- Живая модель за паролем (стенд в mock-режиме) ----------
 
 function restoreProvider() {
@@ -522,6 +564,7 @@ function init() {
     });
   }
   if ($("live-demo")) initLiveDemo();
+  initApiToken();
 
   $("scenario-select").addEventListener("change", (event) => applyScenario(event.target.value));
   $("new-dialog").addEventListener("click", () => {

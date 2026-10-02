@@ -222,6 +222,9 @@ textarea:focus, input:focus, select:focus, .btn:focus-visible, .tab:focus-visibl
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .status.loading::before { animation: none; } }
 
+.token-form { margin-bottom: 12px; }
+.token-form p { margin: 0; }
+
 .banner {
   background: var(--warn-soft); color: var(--warn); border-radius: 8px;
   padding: 8px 10px; font-size: 13px; margin-bottom: 10px;
