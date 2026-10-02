@@ -90,7 +90,7 @@ async function sendFromComposer() {
 async function replayScenario(id) {
   const scenario = state.scenarios.find((s) => s.id === id);
   if (!scenario) return;
-  $("scenario-desc").textContent = scenario.description || "";
+  $("scenario-desc").textContent = keepAmounts(scenario.description || "");
   $("scenario-desc").hidden = !scenario.description;
   startChat(scenario.lead.id);
   const { leadId, chatId } = state;

@@ -6,16 +6,24 @@ const ROLE_LABEL = { client: "Клиент", manager: "Менеджер", bot: "
 
 const $ = (id) => document.getElementById(id);
 
+// Суммы не рвутся при переносе строки («32 / 900 ₽»): пробел между разрядами и перед валютой — неразрывный.
+// Только при выводе: копирование и вставка в ответ берут исходный текст.
+const AMOUNT_GAP_RE = /(\d) (?=\d{3}(?!\d)|₽|руб|р\.)/g;
+
+function keepAmounts(text) {
+  return typeof text === "string" ? text.replace(AMOUNT_GAP_RE, "$1 ") : text;
+}
+
 function el(tag, props = {}, ...children) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(props)) {
     if (key === "class") node.className = value;
-    else if (key === "text") node.textContent = value;
+    else if (key === "text") node.textContent = keepAmounts(value);
     else node.setAttribute(key, value);
   }
   for (const child of children) {
     if (child == null) continue;
-    node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+    node.append(child instanceof Node ? child : document.createTextNode(keepAmounts(String(child))));
   }
   return node;
 }
@@ -27,7 +35,7 @@ function formatTime(iso) {
 }
 
 function rub(value) {
-  return `${Number(value).toLocaleString("ru-RU")} ₽`;
+  return `${Number(value).toLocaleString("ru-RU")} ₽`;
 }
 
 function toast(text) {

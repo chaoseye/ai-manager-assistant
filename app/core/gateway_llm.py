@@ -127,12 +127,36 @@ def format_instruction() -> str:
     )
 
 
+_JSON_DECODER = json.JSONDecoder()
+_MAX_JSON_STARTS = 200  # сколько «{» пробовать: без предела «{{{…» в ответе разбирается за O(n²)
+
+
 def extract_json(text: str) -> str:
-    """JSON-объект из ответа модели: без <think>…</think>, без ```-обёртки и текста вокруг."""
+    """JSON-объект из ответа модели: без <think>…</think>, без ```-обёртки и текста вокруг.
+
+    Объект ищется разбором с каждой «{», а не между первой «{» и последней «}»: иначе ломают и «:}» после
+    JSON, и скобки в незакрытом <think>. Из нескольких объектов берём ответ помощника (с client_reply),
+    иначе самый длинный. Если не разобрался ни один — прежняя вырезка, ошибку покажет валидация.
+    """
     text = _THINK_RE.sub("", text).strip()
     fence = _FENCE_RE.match(text)
     if fence:
         text = fence.group(1).strip()
+    candidates: list[tuple[bool, int, str]] = []
+    position = text.find("{")
+    for _ in range(_MAX_JSON_STARTS):
+        if position == -1:
+            break
+        try:
+            value, end = _JSON_DECODER.raw_decode(text, position)
+        except ValueError:
+            position = text.find("{", position + 1)
+            continue
+        if isinstance(value, dict):
+            candidates.append(("client_reply" in value, end - position, text[position:end]))
+        position = text.find("{", end)  # вложенные объекты найденного не разбираем отдельно
+    if candidates:
+        return max(candidates, key=lambda c: (c[0], c[1]))[2]
     start, end = text.find("{"), text.rfind("}")
     if start != -1 and end > start:
         text = text[start : end + 1]
