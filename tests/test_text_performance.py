@@ -4,7 +4,6 @@
 и проверки выполняются в event loop: пока они идут, сервис не отвечает никому, в том числе вебхукам amoCRM
 (таймаут 2 с). Порог с запасом: линейная обработка 10 000 символов — миллисекунды, квадратичная — секунды.
 
-xfail(strict=True) — известный недочёт (см. шапку test_money_pii_props.py).
 """
 
 import time
@@ -36,18 +35,15 @@ def timed(func, *args) -> float:
     return time.perf_counter() - started
 
 
-@pytest.mark.xfail(strict=True, reason="mask_pii квадратичен на длинных токенах")
 @pytest.mark.parametrize("name", list(HOSTILE))
 def test_mask_pii_is_linear(name):
     assert timed(mask_pii, HOSTILE[name]) < LIMIT_SECONDS
 
 
-@pytest.mark.xfail(strict=True, reason="extract_amounts квадратичен на «111 111 …» без валюты")
 def test_extract_amounts_is_linear():
     assert timed(extract_amounts, "111 " * (N // 4)) < LIMIT_SECONDS
 
 
-@pytest.mark.xfail(strict=True, reason="проверки ответа на враждебной переписке занимают секунды")
 def test_guards_on_hostile_conversation(kb):
     request = SuggestRequest(message="111 " * (N // 4))
     assert timed(apply_guards, make_suggestion(), kb, request, "full") < LIMIT_SECONDS
@@ -60,7 +56,6 @@ def test_normal_text_is_fast():
     assert timed(extract_amounts, text) < LIMIT_SECONDS
 
 
-@pytest.mark.xfail(strict=True, reason="запрос максимального размера обрабатывается десятки секунд")
 def test_largest_valid_request_is_fast(client):
     long_word = "а" * 9_999
     payload = {

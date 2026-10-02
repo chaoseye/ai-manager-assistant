@@ -110,19 +110,20 @@ def test_order_number_starting_with_8_looks_like_phone():
 # Всё, чего не находит extract_amounts, уходит клиенту без проверки — даже выдуманная цена.
 
 
-@pytest.mark.xfail(strict=True, reason="разделитель разрядов «.» — сумма не находится")
-def test_dot_thousands_separator():
-    assert [v for _, v in extract_amounts("Итого 52.900 ₽")] == [52900.0]
+def test_dot_and_comma_thousands_separators():
+    assert [v for _, v in extract_amounts("Итого 52.900 ₽, а не 52,900 руб.")] == [52900.0, 52900.0]
+    assert group_digits("Итого 52.900 ₽") == "Итого 52 900 ₽"
+    assert [v for _, v in extract_amounts("Скидка 52.90 ₽")] == [52.9]  # две цифры — копейки
 
 
-@pytest.mark.xfail(strict=True, reason="«12 тыс. руб.» — сумма не находится")
 def test_thousands_abbreviation():
-    assert [v for _, v in extract_amounts("Монтаж обойдётся в 12 тыс. руб.")] == [12000.0]
+    text = "Монтаж обойдётся в 12 тыс. руб., а с демонтажем 15,5 тысяч рублей"
+    assert [v for _, v in extract_amounts(text)] == [12000.0, 15500.0]
 
 
-@pytest.mark.xfail(strict=True, reason="нижняя граница диапазона «25 000–30 000 ₽» не находится")
 def test_range_lower_bound():
-    assert sorted(v for _, v in extract_amounts("Фасадный монтаж — 25 000–30 000 ₽")) == [25000.0, 30000.0]
+    assert [v for _, v in extract_amounts("Фасадный монтаж — 25 000–30 000 ₽")] == [25000.0, 30000.0]
+    assert [v for _, v in extract_amounts("от 25 до 30 тыс. ₽")] == [25000.0, 30000.0]
 
 
 @pytest.mark.xfail(

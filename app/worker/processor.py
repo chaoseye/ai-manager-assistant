@@ -355,12 +355,9 @@ class Worker:
                 )
 
         request = build_request(split, lead, dialog.origin)
-        result = await self.assistant.suggest(request, mode)
+        result, prepared = await self.assistant.suggest_with_request(request, mode)
         await self.suggestions.save(
-            result,
-            self.assistant.prepare_request(request),
-            dialog_id=dialog.id,
-            trigger_message_id=split.trigger_id,
+            result, prepared, dialog_id=dialog.id, trigger_message_id=split.trigger_id
         )
         await self.jobs.set_suggestion(job.id, result.meta.suggestion_id, split.trigger_id)
         return result
