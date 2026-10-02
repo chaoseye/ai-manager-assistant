@@ -154,10 +154,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     settings = get_settings()
 
-    retries: list[int] = []
-
     def on_retry(attempt: int, delay: float) -> None:
-        retries.append(attempt)
         print(
             f"amoCRM ещё не видит домен («Invalid URL»), повтор через {delay:.0f} с "
             f"(попытка {attempt} из {len(INVALID_URL_RETRY_DELAYS) + 1})",
@@ -180,14 +177,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     masked = destination.replace(settings.webhook_secret or "", "***")
     print(f"Вебхук зарегистрирован: {masked} ({', '.join(EVENTS)})")
-    if retries:
-        # На живом аккаунте после такого вебхуки шли с опозданием 1–6 минут вместо 2 секунд.
-        print(
-            "amoCRM не сразу нашёл домен — вебхуки на этот адрес могут опаздывать на несколько минут. "
-            "Отправьте пробное сообщение заранее. Если оно опоздало, перезапустите туннель "
-            "и зарегистрируйте новый адрес через минуту-две после его запуска.",
-            file=sys.stderr,
-        )
+    # На живом аккаунте вебхук обычно доходил за 2–6 с, но однажды вебхуки на новый адрес шли 1–6 минут,
+    # и связать это с «Invalid URL» при регистрации не удалось. Поэтому напоминание — всегда.
+    print(
+        "Отправьте боту пробное сообщение: обычно вебхук доходит за секунды. "
+        "Если оно опоздало на минуты, поднимите новый туннель и зарегистрируйте его адрес."
+    )
     return 0
 
 
