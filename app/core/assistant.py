@@ -54,6 +54,14 @@ class Assistant:
         self, request: SuggestRequest, mode: Mode = "full", provider: str | None = None
     ) -> SuggestResult:
         """provider — модель из реестра; None — модель по умолчанию, а если она не ответила, запасные."""
+        result, _ = await self.suggest_with_request(request, mode, provider)
+        return result
+
+    async def suggest_with_request(
+        self, request: SuggestRequest, mode: Mode = "full", provider: str | None = None
+    ) -> tuple[SuggestResult, SuggestRequest]:
+        """То же, что suggest(), и подготовленный запрос (обрезанная история, замаскированные ПДн) — его
+        сохраняют вместе с подсказкой, не маскируя переписку второй раз."""
         started = time.perf_counter()
         kb = self.kb_store.current
         prepared = self.prepare_request(request)
@@ -102,7 +110,7 @@ class Assistant:
             fields["message"] = prepared.message
             fields["client_reply"] = suggestion.client_reply
         logger.info("suggestion_created", extra={"fields": fields})
-        return SuggestResult(suggestion=suggestion, meta=meta)
+        return SuggestResult(suggestion=suggestion, meta=meta), prepared
 
     async def _generate_with_fallbacks(
         self, call: LLMCall, provider: str | None

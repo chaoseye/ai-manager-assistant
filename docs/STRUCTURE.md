@@ -155,9 +155,9 @@ Testovoe_O_Complex/
 | `core/gateway_llm.py` | `GatewayLLMClient`: `POST {LLM_GATEWAY_URL}/chat/completions`, схема ответа и в `response_format`, и в системном промпте; упрощение запроса на 400 (без рассуждений → `json_object` → без формата) с запоминанием; повторы на 429/5xx/сетевых ошибках; ошибки ключа, баланса, модели и адреса — без повторов, с подсказкой настройки; разбор `finish_reason` до текста, извлечение JSON из `<think>` и ```` ``` ````, `usage` в формате Anthropic | httpx, `providers`, `llm` |
 | `core/llm_registry.py` | `build_llms()`: в mock-режиме на все модели отвечает `MockLLMClient`; в live — Claude через Anthropic API (если есть ключ или шлюз не настроен), остальные через шлюз. `LLMRegistry`: модель по умолчанию, запасные (`chain()`), `describe()` для API и страницы, `check_gateway()` — при старте отмечает недоступными модели, которых нет в `GET /models` шлюза | `llm`, `gateway_llm`, `mock_llm` |
 | `core/mock_llm.py` | Ответ по совпадению текста обращения с записью из `examples/mock_llm/`, иначе — по похожему вопросу FAQ, иначе — «уточню» с `needs_human` | `llm`, `kb` |
-| `core/guards.py` | Проверки из [FUNCTIONALITY.md, 3.7](FUNCTIONALITY.md#37-проверки-результата-f-06): суммы и их формат, ссылки, товары, допродажа при жалобе и в ответе клиенту, внутренние термины, стоп-фразы, длина | `kb`, `money` |
-| `core/money.py` | `format_rub()` и `extract_amounts()` — суммы только с явной валютой (₽, руб., р.) | — |
-| `core/pii.py` | Маскирование телефонов (РФ и международных), e-mail, номеров карт (с проверкой Луна) | — |
+| `core/guards.py` | Проверки из [FUNCTIONALITY.md, 3.7](FUNCTIONALITY.md#37-проверки-результата-f-06): суммы и их формат (итог — только из проверенных слагаемых, суммы клиента — с проверкой), проценты и «бесплатно», ссылки, товары, допродажа при жалобе и в ответе клиенту, внутренние термины, стоп-фразы, длина | `kb`, `money` |
+| `core/money.py` | `format_rub()`, `group_digits()` и `extract_amounts()` — суммы только с явной валютой (₽, руб., р.), в том числе «52.900 ₽», «12 тыс. руб.» и нижняя граница диапазона; выражения без неограниченных повторов | — |
+| `core/pii.py` | Маскирование телефонов (РФ и международных), e-mail, номеров карт (с проверкой Луна) за линейное время | — |
 | `kb/models.py` | Схемы записей БЗ, `KnowledgeBase` с индексами | — |
 | `kb/loader.py` | Чтение файлов, проверка (все ошибки сразу, с файлом, записью и полем), фиксированный вывод в промпт, хэш версии, атомарная перезагрузка в `KnowledgeStore` | `kb/models` |
 | `amocrm/webhooks.py` | Разбор `message[add]` (клиент) и `outgoing_message[add]` (сотрудник с `user_id` или бот) в `ChatMessageEvent`; ключ диалога — `chat_id`, иначе `talk_id` или `contact_id`. Обратное кодирование для имитатора | — |
@@ -169,7 +169,7 @@ Testovoe_O_Complex/
 | `amocrm/payloads.py` | Сообщение и тело вебхука в формате amoCRM — общие для имитатора и страницы «amoCRM (mock)» | `webhooks` |
 | `amocrm/simulate.py`, `amocrm/setup_webhook.py`, `amocrm/connect.py` | Консольные инструменты: имитатор вебхуков, регистрация вебхука в живом amoCRM (с проверкой адреса через `/health` и пустую посылку, повтором при «Invalid URL»), подключение аккаунта (адрес и токен в `.env`, проверка токена через `GET /api/v4/account`, `AMOCRM_ACCOUNT_ID`, случайный `WEBHOOK_SECRET`) | `payloads`, `factory`, `envfile` |
 | `worker/processor.py` | `Inbox.ingest()`: запись сообщений и постановка задач (пауза перед генерацией). `Worker`: фоновый цикл, задачи с `run_at ≤ now` (до `WORKER_CONCURRENCY` одновременно), выбор `full` / `upsell_only` / `skip`, контекст, ядро, проверка на устаревание, публикация, повторы, примечание о сбое, очистка по сроку хранения | `core`, `amocrm`, `storage` |
-| `storage/db.py`, `storage/repo.py` | Схема SQLite, операции с `suggestions`, `dialogs`, `messages`, `jobs`, очистка | `aiosqlite` |
+| `storage/db.py`, `storage/repo.py` | Схема SQLite, операции с `suggestions`, `dialogs`, `messages`, `jobs`, `dialog_notes`, очистка | `aiosqlite` |
 | `scenarios.py` | Модель и загрузка сценариев (без FastAPI и SDK — её импортирует имитатор) | `core/schemas` |
 | `api/*` | HTTP-роуты, проверка токенов, единый формат ошибок | `core`, `storage`, `worker` |
 | `web/*` | Страницы демо: прямой вызов (`/`) и карточка сделки поддельного amoCRM (`/amocrm`); общий JS — `common.js` | `api` |
@@ -225,7 +225,7 @@ Testovoe_O_Complex/
 | GET | `/api/v1/amocrm-mock/notes` | Только `AMOCRM_MODE=mock` | Примечания поддельного amoCRM: `?entity_type=leads&entity_id=1234&after_id=0` |
 | GET | `/api/v1/amocrm-mock/leads` | Только `AMOCRM_MODE=mock` | Сделки поддельного аккаунта: воронка, этап, бюджет, контакт, теги, товары |
 | POST | `/api/v1/amocrm-mock/messages` | Только `AMOCRM_MODE=mock` | `{lead_id, chat_id, text, direction: in\|out, author_name?, created_at?}` → тело вебхука в формате amoCRM → настоящий разбор и очередь. Секрет вебхука в браузер не попадает |
-| GET | `/api/v1/amocrm-mock/feed` | Только `AMOCRM_MODE=mock` | `?lead_id=&chat_id=&after_note_id=` → лента: сообщения чата и примечания по времени, у примечания — `draft` и `pitch` из сохранённой подсказки; состояние задачи диалога (`status`, `seconds_left`) |
+| GET | `/api/v1/amocrm-mock/feed` | Только `AMOCRM_MODE=mock` | `?lead_id=&chat_id=&after_note_id=` → лента: сообщения чата и примечания этого чата (по `dialog_notes`) по времени, у примечания — `draft` и `pitch` из сохранённой подсказки; состояние задачи диалога (`status`, `seconds_left`) |
 | GET | `/api/v1/leads/{lead_id}/suggestion` | `X-Auth-Token` (виджет) | Последняя актуальная подсказка по сделке (этап 3) |
 | POST | `/api/v1/leads/{lead_id}/regenerate` | `X-Auth-Token` | Немедленная перегенерация, `202 {job_id}` (этап 3) |
 | POST | `/api/v1/suggestions/{id}/feedback` | `X-Auth-Token` или демо | Оценка менеджера, `204` (этап 3) |
@@ -281,7 +281,7 @@ Testovoe_O_Complex/
 `meta.provider` и `meta.model` — модель, которая фактически ответила: при срабатывании запасной модели или серверного fallback Anthropic они отличаются от выбранных.
 
 **Ошибки** возвращаются в едином формате `{"error": {"code": "...", "message": "...", "details"?: ...}}`:
-- `401 unauthorized` — нет или неверный токен;
+- `401 unauthorized` — нет или неверный токен (с заголовком `WWW-Authenticate: Bearer`) либо неверный пароль живой модели (без него);
 - `404 not_found`;
 - `422 invalid_request` — некорректный запрос, в `details` — ошибки полей; неизвестная модель в `?provider=`;
 - `422 kb_invalid` — БЗ не прошла проверку при перезагрузке;
@@ -348,6 +348,13 @@ Testovoe_O_Complex/
 | `error` | TEXT NULL | Причина повтора, пропуска или сбоя |
 | `suggestion_id` | TEXT NULL | Сгенерированная подсказка — чтобы повтор публикации не генерировал её заново |
 | `created_at`, `updated_at` | TEXT | |
+
+**`dialog_notes`** — примечания, которые сервис записал по диалогу: подсказка, вложение без текста, сбой. По ним лента страницы «amoCRM (mock)» показывает только примечания своего чата.
+| Поле | Тип | Описание |
+|---|---|---|
+| `note_id` | INTEGER PK | id примечания в amoCRM |
+| `dialog_id` | INTEGER | Диалог |
+| `created_at` | TEXT | Когда записано — по нему работает срок хранения |
 
 ## 9. Методы API amoCRM
 
@@ -502,13 +509,23 @@ tests/
 ├── test_worker.py                 # очередь: пауза, дубли, режимы, stale, вложения, повторы, сбои, перезапуск, очистка
 ├── test_webhook_api.py            # вебхук по HTTP, health, настройки; API и страница «amoCRM (mock)»
 ├── test_amocrm_tools.py           # имитатор end-to-end через TestClient, регистрация вебхука
-└── test_amocrm_connect.py         # подключение аккаунта: разбор адреса, проверка токена, запись в .env
+├── test_amocrm_connect.py         # подключение аккаунта: разбор адреса, проверка токена, запись в .env
+├── test_money_pii_props.py        # свойства сумм и ПДн (hypothesis), формы записи сумм
+├── test_guards_bypass.py          # инварианты проверок на случайных ответах, обходы проверки цен и условий
+├── test_prompt_and_parsing.py     # защита разметки промпта на случайном тексте, JSON из «грязных» ответов
+├── test_webhook_robustness.py     # разбор вебхука на произвольном вводе, граничные значения полей
+├── test_api_access.py             # подбор пароля живой модели, API_TOKEN на странице, заголовки, крайние входы
+├── test_queue_and_feed.py         # параллельные проходы очереди, лента своего чата, настройки очереди
+├── test_kb_robustness.py          # БЗ на испорченных файлах (hypothesis), перезагрузка после «бытовых» правок
+└── test_text_performance.py       # враждебные тексты обрабатываются за линейное время
 evals/
 ├── cases.yaml                     # 31 кейс: вход + ожидаемые свойства результата
 ├── run_eval.py                    # прогон, проверки, метрики, стоимость, отчёт, --provider (all — сравнение), --record
 ├── record_scenarios.py            # ответы модели на демо-сценарии → examples/mock_llm (только прошедшие проверки)
 └── reports/                       # отчёты прогонов в Markdown
 ```
+
+Известные недочёты, которые ещё не исправлены, оформлены тестами с `xfail(strict=True)`: тест описывает правильное поведение. Когда недочёт исправят, прогон упадёт на XPASS — тогда пометку нужно снять. Тесты свойств (hypothesis) по умолчанию берут 100 примеров; больше — `HYPOTHESIS_MAX_EXAMPLES=1000 pytest`.
 
 Пример кейса eval:
 ```yaml

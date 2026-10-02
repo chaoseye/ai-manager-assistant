@@ -38,8 +38,9 @@ def test_recordings_pass_guards(kb, scenario):
     recording = RECORDINGS[normalize(message)]
     result, warnings = apply_guards(recording.suggestion, kb, request, "full")
     if scenario.id == GUARD_DEMO:
-        assert [w.code for w in warnings] == ["price_not_in_kb"]
-        assert "52 900 ₽" in warnings[0].message  # ошибочная цена; итог 62 800 ₽ выводится из неё и монтажа
+        assert [w.code for w in warnings] == ["price_not_in_kb", "price_not_in_kb"]
+        # Ошибочная цена и итог, посчитанный от неё: 52 900 + 9 900 = 62 800 вместо 64 800.
+        assert "52 900 ₽" in warnings[0].message and "62 800 ₽" in warnings[1].message
         assert result.needs_human is True
         return
     assert warnings == [], [w.message for w in warnings]

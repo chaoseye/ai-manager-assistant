@@ -39,8 +39,8 @@ async def suggest(
         raise HTTPException(status_code=422, detail=detail)
     if live is not None:
         live.spend()
-    result = await assistant.suggest(request, provider=provider)
-    await repo.save(result, assistant.prepare_request(request))
+    result, prepared = await assistant.suggest_with_request(request, provider=provider)
+    await repo.save(result, prepared)
     return result
 
 

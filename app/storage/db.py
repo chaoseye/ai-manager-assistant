@@ -66,6 +66,15 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_jobs_pending ON jobs (dialog_id) WHERE status = 'pending';
 CREATE INDEX IF NOT EXISTS ix_jobs_due ON jobs (status, run_at);
+
+-- Примечания, которые сервис записал по диалогу: подсказка, вложение без текста, сбой. По ним лента
+-- страницы «amoCRM (mock)» показывает только примечания своего чата, а не всей сделки.
+CREATE TABLE IF NOT EXISTS dialog_notes (
+    note_id    INTEGER PRIMARY KEY,
+    dialog_id  INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_dialog_notes_dialog ON dialog_notes (dialog_id);
 """
 
 

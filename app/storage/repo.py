@@ -65,7 +65,11 @@ class SuggestionRepo:
         return await self._one("SELECT * FROM suggestions WHERE id = ?", suggestion_id)
 
     async def get_by_note_id(self, note_id: int) -> dict[str, Any] | None:
-        return await self._one("SELECT * FROM suggestions WHERE note_id = ?", note_id)
+        # Поддельный amoCRM после перезапуска нумерует примечания заново, а БД остаётся — берём последнюю.
+        return await self._one(
+            "SELECT * FROM suggestions WHERE note_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            note_id,
+        )
 
     async def _one(self, sql: str, value: object) -> dict[str, Any] | None:
         rows = await self._db.conn.execute_fetchall(sql, (value,))
@@ -172,6 +176,23 @@ class DialogRepo:
         inserted = cursor.rowcount == 1
         await cursor.close()
         return inserted
+
+    async def add_note(self, dialog_id: int, note_id: int | None, now: datetime) -> None:
+        """Запоминает примечание, записанное по диалогу (id нет — amoCRM его не вернул, запоминать нечего)."""
+        if note_id is None:
+            return
+        cursor = await self._db.conn.execute(
+            "INSERT OR REPLACE INTO dialog_notes (note_id, dialog_id, created_at) VALUES (?, ?, ?)",
+            (note_id, dialog_id, to_iso(now)),
+        )
+        await cursor.close()
+        await self._db.conn.commit()
+
+    async def note_ids(self, dialog_id: int) -> set[int]:
+        rows = await self._db.conn.execute_fetchall(
+            "SELECT note_id FROM dialog_notes WHERE dialog_id = ?", (dialog_id,)
+        )
+        return {row["note_id"] for row in rows}
 
     async def get(self, dialog_id: int) -> Dialog | None:
         return await self._one("SELECT * FROM dialogs WHERE id = ?", dialog_id)
@@ -374,6 +395,7 @@ async def cleanup(db: Database, cutoff: datetime) -> dict[str, int]:
         "messages": "DELETE FROM messages WHERE received_at < ?",
         "suggestions": "DELETE FROM suggestions WHERE created_at < ?",
         "jobs": "DELETE FROM jobs WHERE updated_at < ? AND status NOT IN ('pending', 'running')",
+        "dialog_notes": "DELETE FROM dialog_notes WHERE created_at < ?",
         "dialogs": """
             DELETE FROM dialogs WHERE updated_at < ?
               AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.dialog_id = dialogs.id)

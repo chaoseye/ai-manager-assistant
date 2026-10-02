@@ -33,7 +33,13 @@ def _check_bearer(expected: str | None, authorization: str | None, name: str) ->
     if authorization and authorization.lower().startswith("bearer "):
         provided = authorization[7:].strip()
     if not secrets.compare_digest(provided.encode(), expected.encode()):
-        raise HTTPException(status_code=401, detail=f"Нужен заголовок Authorization: Bearer <{name}>")
+        # WWW-Authenticate отличает «нужен токен» от неверного пароля живой модели: по нему страница
+        # демо понимает, что надо спросить токен.
+        raise HTTPException(
+            status_code=401,
+            detail=f"Нужен заголовок Authorization: Bearer <{name}>",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 def require_api_token(request: Request, authorization: str | None = Header(default=None)) -> None:

@@ -83,9 +83,12 @@ async def feed(request: Request, lead_id: int, chat_id: str, after_note_id: int 
     items: list[dict[str, Any]] = []
     queue: dict[str, Any] | None = None
     now = datetime.now(UTC)
+    own_notes: set[int] = set()
 
     dialog = await state.dialogs.get_by_key(chat_id)
     if dialog is not None:
+        # Примечания только этого чата: другие зрители той же сделки ведут свои чаты.
+        own_notes = await state.dialogs.note_ids(dialog.id)
         for message in await state.dialogs.messages(dialog.id):
             items.append(
                 {
@@ -110,6 +113,8 @@ async def feed(request: Request, lead_id: int, chat_id: str, after_note_id: int 
             }
 
     for note in fake.list_notes("leads", lead_id, after_note_id):
+        if note["id"] not in own_notes:
+            continue
         saved = await state.repo.get_by_note_id(note["id"])
         suggestion = saved["suggestion"] if saved else None
         text = note["params"].get("text", "")

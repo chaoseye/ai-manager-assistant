@@ -50,6 +50,7 @@ def _page_context(request: Request, active: str) -> dict[str, object]:
         "debounce_seconds": state.settings.debounce_seconds,
         "static_version": STATIC_VERSION,
         "live_demo": getattr(state, "live_demo", None) is not None,
+        "api_token_required": bool(state.settings.api_token),
     }
 
 
