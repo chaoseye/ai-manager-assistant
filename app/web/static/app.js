@@ -223,10 +223,10 @@ function renderSuggestion({ suggestion: s, meta }) {
   $("stale").hidden = true;
 
   const upsellOnly = meta.mode === "upsell_only";
-  $("reply-text").textContent = upsellOnly ? "Менеджер уже ответил — черновик не нужен." : s.client_reply;
+  $("reply-text").textContent = upsellOnly ? "Менеджер уже ответил — черновик не нужен." : keepAmounts(s.client_reply);
   $("needs-human").hidden = !s.needs_human;
   $("needs-human-reason").hidden = !s.needs_human;
-  $("needs-human-reason").textContent = s.needs_human_reason || "Проверьте ответ перед отправкой.";
+  $("needs-human-reason").textContent = keepAmounts(s.needs_human_reason) || "Проверьте ответ перед отправкой.";
   $("insert-reply").disabled = upsellOnly || !s.client_reply;
   $("copy-reply").disabled = upsellOnly || !s.client_reply;
 
