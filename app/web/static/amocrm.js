@@ -12,7 +12,6 @@ const state = {
   scenarios: [],
   leadId: null,
   chatId: null,
-  afterNoteId: 0,
   pollTimer: null,
   pollSeq: 0,
   lastRendered: "",
@@ -41,15 +40,13 @@ function renderLead() {
   $("feed-sub").textContent = `чат ${state.chatId} · ${lead.contact_name || "клиент"}`;
 }
 
-async function startChat(leadId) {
+function startChat(leadId) {
   stopPolling();
   state.leadId = leadId;
+  // Новый чат — новый диалог в сервисе: лента показывает только его сообщения и примечания.
   state.chatId = `web-${leadId}-${Math.random().toString(36).slice(2, 8)}`;
   state.lastRendered = "";
   $("lead-select").value = String(leadId);
-  // Показываем только примечания нового чата: всё, что было в ленте сделки раньше, скрываем.
-  const notes = await fetchJSON(`/api/v1/amocrm-mock/notes?entity_type=leads&entity_id=${leadId}`);
-  state.afterNoteId = notes.reduce((max, note) => Math.max(max, note.id), 0);
   renderLead();
   renderFeed({ items: [], queue: null });
   schedulePoll(0);
@@ -57,8 +54,11 @@ async function startChat(leadId) {
 
 // ---------- Отправка ----------
 
-async function send(direction, text, { createdAt = null, authorName = null } = {}) {
-  const body = { lead_id: state.leadId, chat_id: state.chatId, text, direction };
+// Чат передаётся явно: проигрывание сценария не должно дописывать в чат, который зритель открыл позже.
+async function send(direction, text, {
+  createdAt = null, authorName = null, leadId = state.leadId, chatId = state.chatId,
+} = {}) {
+  const body = { lead_id: leadId, chat_id: chatId, text, direction };
   if (createdAt) body.created_at = createdAt;
   if (authorName) body.author_name = authorName;
   await fetchJSON("/api/v1/amocrm-mock/messages", {
@@ -90,21 +90,25 @@ async function replayScenario(id) {
   if (!scenario) return;
   $("scenario-desc").textContent = scenario.description || "";
   $("scenario-desc").hidden = !scenario.description;
-  await startChat(scenario.lead.id);
+  startChat(scenario.lead.id);
+  const { leadId, chatId } = state;
   const now = Math.floor(Date.now() / 1000);
   const count = scenario.dialog.length;
   state.sending = true;
   try {
     for (const [index, message] of scenario.dialog.entries()) {
+      if (state.chatId !== chatId) return; // зритель выбрал другой сценарий или начал новый чат
       await send(message.role === "client" ? "in" : "out", message.text, {
         createdAt: now - (count - 1 - index) * SCENARIO_STEP_SECONDS,
         authorName: message.role === "client" ? null : message.author_name,
+        leadId,
+        chatId,
       });
     }
   } catch (error) {
     toast(error.message);
   } finally {
-    state.sending = false;
+    if (state.chatId === chatId) state.sending = false;
   }
   schedulePoll(0);
 }
@@ -206,7 +210,7 @@ async function poll() {
   const chatId = state.chatId;
   let active = false;
   try {
-    const params = new URLSearchParams({ lead_id: state.leadId, chat_id: chatId, after_note_id: state.afterNoteId });
+    const params = new URLSearchParams({ lead_id: state.leadId, chat_id: chatId });
     const data = await fetchJSON(`/api/v1/amocrm-mock/feed?${params}`);
     if (seq !== state.pollSeq || chatId !== state.chatId) return;
     renderFeed(data);
@@ -268,7 +272,7 @@ async function init() {
 
   // По умолчанию — сделка первого сценария: с неё удобнее начинать показ.
   const firstLead = state.scenarios.length ? state.scenarios[0].lead.id : state.leads[0]?.id;
-  if (firstLead) await startChat(firstLead);
+  if (firstLead) startChat(firstLead);
 }
 
 document.addEventListener("DOMContentLoaded", init);

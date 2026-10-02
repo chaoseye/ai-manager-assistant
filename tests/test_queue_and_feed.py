@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from app.core.llm import LLMRefusedError
 from app.main import create_app
 from tests.conftest import FakeLLM, make_settings, make_suggestion
 from tests.test_worker import T0, env, incoming, outgoing  # noqa: F401  (env — фикстура)
@@ -85,14 +86,37 @@ def feed(client, chat, lead=1234):
     return client.get("/api/v1/amocrm-mock/feed", params={"lead_id": lead, "chat_id": chat}).json()
 
 
-@pytest.mark.xfail(strict=True, reason="лента чата показывает примечания других чатов той же сделки")
 def test_feed_shows_only_notes_of_its_chat(page):
     # Два зрителя открыли одну сделку (на Vercel это один экземпляр функции).
     send(page, "web-alice", "Сколько стоит монтаж?")
     send(page, "web-bob", "А доставка сколько стоит?")
     assert tick(page) == 2
-    notes = [item for item in feed(page, "web-alice")["items"] if item["kind"] == "note"]
-    assert len(notes) == 1
+    alice = [item for item in feed(page, "web-alice")["items"] if item["kind"] == "note"]
+    bob = [item for item in feed(page, "web-bob")["items"] if item["kind"] == "note"]
+    assert len(alice) == len(bob) == 1 and alice[0]["id"] != bob[0]["id"]
+    assert feed(page, "web-carol")["items"] == []  # новый чат той же сделки начинается с пустой ленты
+
+
+async def test_failure_note_belongs_to_its_dialog(env):  # noqa: F811
+    env.make_worker(FakeLLM(LLMRefusedError("отказ")))
+    await env.ingest(incoming("m1", "…"))
+    env.clock.advance(6)
+    await env.worker.tick()
+    [note] = env.fake.notes
+    dialog = await env.worker.dialogs.get_by_key("chat-1")
+    assert await env.worker.dialogs.note_ids(dialog.id) == {note["id"]}
+
+
+async def test_recycled_note_id_returns_latest_suggestion(env):  # noqa: F811
+    # Поддельный amoCRM после перезапуска нумерует примечания заново, а БД сервиса остаётся.
+    for text in ("Сколько стоит монтаж?", "А доставка?"):
+        await env.ingest(incoming(f"m-{text}", text, chat=f"chat-{text}"))
+    env.clock.advance(6)
+    await env.worker.tick()
+    first, second = env.fake.notes
+    saved_second = await env.suggestions.get_by_note_id(second["id"])
+    await env.suggestions.set_note_id(saved_second["id"], first["id"])
+    assert (await env.suggestions.get_by_note_id(first["id"]))["id"] == saved_second["id"]
 
 
 def test_feed_queue_lifecycle(page):

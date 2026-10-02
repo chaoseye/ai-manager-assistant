@@ -318,7 +318,8 @@ class Worker:
             if resolved.note_target is None:
                 return JOB_DONE, "вложение без текста; сделка и контакт не найдены"
             note = format_attachment_note([m.attachment_type or "" for m in split.run])
-            await self.amo.add_note(*resolved.note_target, note, self.settings.note_service_name)
+            note_id = await self.amo.add_note(*resolved.note_target, note, self.settings.note_service_name)
+            await self.dialogs.add_note(dialog.id, note_id, self.clock())
             return JOB_DONE, "вложение без текста: отправлено уведомление"
 
         result = await self._generate(job, split, dialog, resolved.lead, mode)
@@ -335,6 +336,7 @@ class Worker:
         text = format_suggestion_note(result, include_reply=include_reply)
         note_id = await self.amo.add_note(*resolved.note_target, text, self.settings.note_service_name)
         await self.suggestions.set_note_id(result.meta.suggestion_id, note_id)
+        await self.dialogs.add_note(dialog.id, note_id, self.clock())
         state.details["note_id"] = note_id
         return JOB_DONE, ""
 
@@ -384,7 +386,8 @@ class Worker:
         if target is not None:
             try:
                 note = format_failure_note(_friendly_reason(exc))
-                await self.amo.add_note(*target, note, self.settings.note_service_name)
+                note_id = await self.amo.add_note(*target, note, self.settings.note_service_name)
+                await self.dialogs.add_note(job.dialog_id, note_id, now)
             except AmoError as note_error:
                 logger.warning(
                     "failure_note_not_sent", extra={"fields": {"job_id": job.id, "error": str(note_error)}}
