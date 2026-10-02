@@ -1,9 +1,12 @@
+import os
 import shutil
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from hypothesis import HealthCheck
+from hypothesis import settings as hypothesis_settings
 
 from app.config import BASE_DIR, Settings
 from app.core.llm import LLMCall, LLMError, LLMResponse
@@ -13,6 +16,16 @@ from app.kb.models import KnowledgeBase
 from app.main import create_app
 
 KB_DIR = BASE_DIR / "knowledge_base"
+
+# Тесты свойств (hypothesis): без ограничения по времени на пример — на медленных машинах CI оно даёт
+# ложные падения. Больше примеров для локального прогона: HYPOTHESIS_MAX_EXAMPLES=1000 pytest.
+hypothesis_settings.register_profile(
+    "project",
+    deadline=None,
+    max_examples=int(os.environ.get("HYPOTHESIS_MAX_EXAMPLES", "100")),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+hypothesis_settings.load_profile("project")
 
 
 def make_settings(tmp_path: Path, **overrides: object) -> Settings:
