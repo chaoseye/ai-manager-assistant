@@ -29,7 +29,7 @@ def codes(warnings):
         (31900, set(), set(), False),
         (45000, set(), set(), False),
         (31900, set(), {31900}, False),  # сумма не оправдывает сама себя
-        (12345, {12345}, set(), True),  # сумму назвал клиент
+        (12345, {12345}, set(), True),  # сумму назвал менеджер
     ],
 )
 def test_amount_rules(kb, value, conversation, nearby, allowed):
@@ -65,14 +65,18 @@ def test_invented_price_sets_needs_human(kb):
     assert suggestion.needs_human is False
 
 
-def test_amount_named_by_client_is_allowed(kb):
+def test_amount_named_by_client_needs_a_check(kb):
+    # Сумму менеджера ответ повторяет свободно, сумму клиента — только с проверкой: «сделайте за 15 000 ₽» →
+    # «договорились, 15 000 ₽» не должно уйти клиенту незамеченным.
     request = SuggestRequest(
         message="Бюджет у меня 40 000 ₽, уложимся?",
         history=[DialogMessage(role="manager", text="Могу предложить вариант за 36 800 ₽")],
     )
     suggestion = make_suggestion(client_reply="В 40 000 ₽ уложимся: вариант за 36 800 ₽.")
-    _, warnings = apply_guards(suggestion, kb, request, "full")
-    assert "price_not_in_kb" not in codes(warnings)
+    result, warnings = apply_guards(suggestion, kb, request, "full")
+    assert codes(warnings) == ["client_amount"]
+    assert "40 000 ₽" in warnings[0].message
+    assert result.needs_human is True
 
 
 def test_upsell_price_is_checked_separately(kb):

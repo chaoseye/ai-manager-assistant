@@ -145,7 +145,6 @@ def test_complaint_keeps_pitch_after_timing_change(kb):
 # ---------- Обходы проверки цен ----------
 
 
-@pytest.mark.xfail(strict=True, reason="цену, которую назвал клиент, ответ «подтверждает» без needs_human")
 def test_client_proposed_price_is_flagged(kb):
     request = SuggestRequest(message="Сделайте Basic 09 с монтажом за 15 000 ₽, тогда беру сегодня")
     reply = "Анна, договорились: Basic 09 с монтажом за 15 000 ₽. Когда удобно принять мастера?"
@@ -153,9 +152,6 @@ def test_client_proposed_price_is_flagged(kb):
     assert result.needs_human and warnings
 
 
-@pytest.mark.xfail(
-    strict=True, reason="цена конкурента из сообщения клиента проходит как «названная в переписке»"
-)
 def test_competitor_price_is_flagged(kb):
     request = SuggestRequest(
         message="У конкурента такой же за 25 000 ₽",
@@ -166,7 +162,6 @@ def test_competitor_price_is_flagged(kb):
     assert result.needs_human and warnings
 
 
-@pytest.mark.xfail(strict=True, reason="обещанная скидка в процентах не проверяется")
 def test_unknown_discount_percent_is_flagged(kb):
     reply = "Для вас скидка 90% на всё оборудование! Когда удобно оформить заказ?"
     result, warnings = apply_guards(
@@ -175,14 +170,70 @@ def test_unknown_discount_percent_is_flagged(kb):
     assert warnings and result.needs_human
 
 
-@pytest.mark.xfail(strict=True, reason="«бесплатный монтаж» не проверяется")
 def test_free_install_promise_is_flagged(kb):
     reply = "Монтаж для вас бесплатный. Когда удобно принять мастера?"
     result, warnings = apply_guards(make_suggestion(client_reply=reply), kb, REQUEST, "full")
     assert warnings and result.needs_human
 
 
-@pytest.mark.xfail(strict=True, reason="итог от ошибочного слагаемого не помечается — только само слагаемое")
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "Бесплатный монтаж при заказе сегодня.",
+        "Годовое обслуживание для вас бесплатно.",
+        "Wi-Fi модуль дадим в подарок.",
+        "Подарим скидку на монтаж.",
+        "Скидка 10% на монтаж, если закажете сегодня.",
+    ],
+)
+def test_terms_not_in_kb_are_flagged(kb, reply):
+    result, warnings = apply_guards(make_suggestion(client_reply=reply), kb, REQUEST, "full")
+    assert "terms_not_in_kb" in codes(warnings)
+    assert result.needs_human
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        # То, что база знаний действительно называет бесплатным или даёт в процентах.
+        "При заказе с монтажом доставка бесплатная.",
+        "В гарантийный период выезд на диагностику бесплатный.",
+        "Гарантийный ремонт бесплатный.",
+        "Инверторные модели на 25–30% экономичнее.",
+        # Отказы — не обещания.
+        "Скидки 90% у нас нет, но при заказе двух кондиционеров действует скидка 5%.",
+        "Бесплатного монтажа нет: стандартный монтаж стоит 9 900 ₽.",
+    ],
+)
+def test_terms_from_kb_and_refusals_pass(kb, reply):
+    _, warnings = apply_guards(make_suggestion(client_reply=reply), kb, REQUEST, "full")
+    assert "terms_not_in_kb" not in codes(warnings)
+
+
+def test_percent_named_by_manager_passes(kb):
+    request = SuggestRequest(
+        message="А скидку дадите?",
+        history=[DialogMessage(role="manager", text="Согласовали для вас 7% на монтаж")],
+    )
+    reply = "Да, как и договорились, 7% на монтаж."
+    _, warnings = apply_guards(make_suggestion(client_reply=reply), kb, request, "full")
+    assert "terms_not_in_kb" not in codes(warnings)
+
+
+def test_terms_in_pitch_warn_without_needs_human(kb):
+    suggestion = make_suggestion(
+        upsell={
+            "recommended": True,
+            "timing": "now",
+            "product_ids": ["service-1y"],
+            "pitch": "Обслуживание — в подарок!",
+        }
+    )
+    result, warnings = apply_guards(suggestion, kb, REQUEST, "full")
+    assert codes(warnings) == ["upsell_terms_not_in_kb"]
+    assert result.needs_human is False  # фразу допродажи видит только менеджер
+
+
 def test_total_built_on_wrong_summand_is_flagged(kb):
     # Записанный ответ сценария «Проверка цен»: 52 900 вместо 54 900 и итог 62 800 вместо 64 800.
     reply = "Павел, Inverter 12 стоит 52 900 ₽, стандартный монтаж — 9 900 ₽, итого 62 800 ₽."
