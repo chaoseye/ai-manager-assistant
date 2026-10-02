@@ -65,18 +65,62 @@ def test_invented_price_sets_needs_human(kb):
     assert suggestion.needs_human is False
 
 
-def test_amount_named_by_client_needs_a_check(kb):
-    # Сумму менеджера ответ повторяет свободно, сумму клиента — только с проверкой: «сделайте за 15 000 ₽» →
-    # «договорились, 15 000 ₽» не должно уйти клиенту незамеченным.
-    request = SuggestRequest(
-        message="Бюджет у меня 40 000 ₽, уложимся?",
-        history=[DialogMessage(role="manager", text="Могу предложить вариант за 36 800 ₽")],
-    )
-    suggestion = make_suggestion(client_reply="В 40 000 ₽ уложимся: вариант за 36 800 ₽.")
-    result, warnings = apply_guards(suggestion, kb, request, "full")
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "Да, сделаем за 30 000 ₽.",
+        # Точка сокращения обрывала предложение, и сумма выпадала из проверки.
+        "Да, сделаем за 30 000 р. Мастер приедет в течение 1–3 рабочих дней.",
+        "Да, сделаем за 30 тыс. руб. Когда удобно принять мастера?",
+        "Да, 30 000 р. за всё, мастер приедет завтра.",
+        # Цена из БЗ рядом не делает сумму клиента ценой: её клиент назвал не бюджетом.
+        "Договорились: 30 000 ₽ вместо 32 900 ₽.",
+    ],
+)
+def test_amount_named_by_client_needs_a_check(kb, reply):
+    # Сумму менеджера ответ повторяет свободно, сумму клиента — только с проверкой: «сделайте за 30 000 ₽» →
+    # «договорились, 30 000 ₽» не должно уйти клиенту незамеченным.
+    request = SuggestRequest(message="Сделаете Basic 09 с монтажом за 30 000 ₽?")
+    result, warnings = apply_guards(make_suggestion(client_reply=reply), kb, request, "full")
     assert codes(warnings) == ["client_amount"]
-    assert "40 000 ₽" in warnings[0].message
     assert result.needs_human is True
+
+
+@pytest.mark.parametrize(
+    ("message", "history", "reply"),
+    [
+        ("Бюджет до 40 000 ₽. Что посоветуете с установкой?", [],
+         "В бюджет 40 000 ₽ укладывается Basic 07 с монтажом — 37 800 ₽."),
+        ("Бюджет у меня 40 000 ₽, уложимся?", ["Могу предложить вариант за 36 800 ₽"],
+         "В 40 000 ₽ уложимся: вариант за 36 800 ₽."),
+        ("Хочу уложиться в 45 000 ₽", [], "В 45 000 ₽ входит Basic 09 с монтажом: 42 800 ₽."),
+    ],
+)  # fmt: skip
+def test_client_budget_beside_a_fitting_price_is_not_flagged(kb, message, history, reply):
+    request = SuggestRequest(
+        message=message, history=[DialogMessage(role="manager", text=text) for text in history]
+    )
+    result, warnings = apply_guards(make_suggestion(client_reply=reply), kb, request, "full")
+    assert warnings == []
+    assert result.needs_human is False
+
+
+def test_client_budget_does_not_cover_accepting_it_as_price(kb):
+    # «Бюджет» не лазейка: цена из БЗ рядом в него не укладывается — значит, ответ соглашается
+    # на цену клиента.
+    request = SuggestRequest(message="Мой бюджет 15 000 ₽, сделайте Basic 09 за него")
+    reply = "Договорились: Basic 09 за 15 000 ₽, обычно он стоит 32 900 ₽."
+    result, warnings = apply_guards(make_suggestion(client_reply=reply), kb, request, "full")
+    assert codes(warnings) == ["client_amount"]
+    assert result.needs_human is True
+
+
+def test_client_amount_in_refusal_after_abbreviation_is_not_flagged(kb):
+    # «руб.» перед строчной буквой — не конец предложения: отрицание дальше относится к той же сумме.
+    request = SuggestRequest(message="Сделаете за 30 000 руб.?")
+    reply = "Монтаж — 9 900 руб. Цена 30 000 руб. не действует, Basic 09 стоит 32 900 руб."
+    _, warnings = apply_guards(make_suggestion(client_reply=reply), kb, request, "full")
+    assert warnings == []
 
 
 def test_upsell_price_is_checked_separately(kb):

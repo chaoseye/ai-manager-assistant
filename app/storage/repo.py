@@ -181,10 +181,11 @@ class DialogRepo:
         """Запоминает примечание, записанное по диалогу (id нет — amoCRM его не вернул, запоминать нечего)."""
         if note_id is None:
             return
-        await self._db.conn.execute(
+        cursor = await self._db.conn.execute(
             "INSERT OR REPLACE INTO dialog_notes (note_id, dialog_id, created_at) VALUES (?, ?, ?)",
             (note_id, dialog_id, to_iso(now)),
         )
+        await cursor.close()
         await self._db.conn.commit()
 
     async def note_ids(self, dialog_id: int) -> set[int]:

@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from itertools import combinations, combinations_with_replacement
 
-from app.core.money import extract_amounts, group_digits
+from app.core.money import AMOUNT_RE, extract_amounts, group_digits
 from app.core.schemas import GuardWarning, Mode, Suggestion, SuggestRequest
 from app.kb.models import KnowledgeBase
 
@@ -204,9 +204,49 @@ def _percents(text: str) -> list[tuple[str, float]]:
     return found
 
 
+def _ends_sentence(text: str, pos: int) -> bool:
+    rest = text[pos:].lstrip(" \t  ")
+    return not rest or rest[0] == "\n" or rest[0].isupper()
+
+
+def _mask_amount_dots(match: re.Match[str]) -> str:
+    """Точки внутри суммы («12 тыс. руб.») — не конец предложения; точка в конце суммы («30 000 р.») — конец,
+    только если дальше заглавная буква, перенос строки или конец текста: «30 000 руб. не действует» — одно
+    предложение. Длина не меняется, чтобы позиции совпадали с исходным текстом."""
+    raw = match.group(0)
+    last = raw[-1]
+    if last == "." and not _ends_sentence(match.string, match.end()):
+        last = " "
+    return raw[:-1].replace(".", " ") + last
+
+
+def _sentences(text: str) -> list[str]:
+    """Предложения текста вместе с завершающим знаком; сокращения в суммах предложение не обрывают."""
+    masked = AMOUNT_RE.sub(_mask_amount_dots, text)
+    return [text[m.start() : m.end() + 1] for m in _SENTENCE_RE.finditer(masked)]
+
+
 def _affirmed(text: str) -> list[str]:
     """Предложения без отрицания: в них ответ утверждает, а не отказывает («скидки 90% нет» — отказ)."""
-    return [s for s in _SENTENCE_RE.findall(text) if not _NEGATION_RE.search(s)]
+    return [s for s in _sentences(text) if not _NEGATION_RE.search(s)]
+
+
+# Сумма клиента как бюджет или верхняя граница: «бюджет 40 000 ₽», «до 40 000 ₽», «в пределах 40 000 ₽».
+_BUDGET_RE = re.compile(
+    r"бюджет|в\s+пределах|не\s+(?:больше|дороже|выше|более)|максимум|уложи|\bдо\s+\d", re.IGNORECASE
+)
+
+
+def _client_budgets(request: SuggestRequest) -> set[int]:
+    """Суммы, которые клиент назвал бюджетом или верхней границей цены."""
+    texts = [request.message] + [m.text for m in (*request.history, *request.replies) if m.role == "client"]
+    return {
+        round(value)
+        for text in texts
+        for sentence in _sentences(text)
+        if _BUDGET_RE.search(sentence)
+        for _, value in extract_amounts(sentence)
+    }
 
 
 def _kb_terms(kb: KnowledgeBase) -> _Terms:
@@ -400,13 +440,24 @@ def apply_guards(
     staff, client = _conversation_amounts(request)
     reply_amounts = extract_amounts(result.client_reply)
     upsell_amounts = extract_amounts(f"{upsell.offer}\n{upsell.pitch}")
-    affirmed = {
-        round(value) for sentence in _affirmed(result.client_reply) for _, value in extract_amounts(sentence)
-    }
-    for raw, value in _unexplained(reply_amounts, reply_amounts, rules, staff):
+    reply_unexplained = _unexplained(reply_amounts, reply_amounts, rules, staff)
+    unexplained = {round(value) for _, value in reply_unexplained}
+    budgets = _client_budgets(request)
+    confirmed: set[int] = set()  # суммы, которые ответ утверждает как цену
+    for sentence in _affirmed(result.client_reply):
+        values = {round(value) for _, value in extract_amounts(sentence)}
+        prices = values - unexplained  # суммы предложения, которые выводятся из БЗ или слов менеджера
+        for value in values & unexplained:
+            # «В бюджет 40 000 ₽ укладывается Basic 07 с монтажом — 37 800 ₽»: бюджет клиента рядом
+            # с ценой из БЗ, которая в него укладывается, — сравнение. «Договорились: 15 000 ₽ вместо
+            # 32 900 ₽» — нет: 15 000 клиент назвал не бюджетом, да и цена в него не укладывается.
+            if _near(value, budgets) and any(price <= value for price in prices):
+                continue
+            confirmed.add(value)
+    for raw, value in reply_unexplained:
         if _near(value, client):
-            if round(value) not in affirmed:
-                continue  # «цена 1 рубль не действует» — отказ, а не подтверждение
+            if round(value) not in confirmed:
+                continue  # «цена 1 рубль не действует» — отказ; бюджет рядом с подходящей ценой — сравнение
             warn(
                 "client_amount",
                 f"Сумму «{raw}» назвал клиент, а в базе знаний её нет — проверьте, что ответ "

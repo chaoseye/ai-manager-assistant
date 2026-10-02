@@ -46,6 +46,8 @@ function startChat(leadId) {
   // Новый чат — новый диалог в сервисе: лента показывает только его сообщения и примечания.
   state.chatId = `web-${leadId}-${Math.random().toString(36).slice(2, 8)}`;
   state.lastRendered = "";
+  // Сценарий старого чата остановится сам и флаг не сбросит — иначе поле ввода нового чата не отправляет.
+  state.sending = false;
   $("lead-select").value = String(leadId);
   renderLead();
   renderFeed({ items: [], queue: null });
