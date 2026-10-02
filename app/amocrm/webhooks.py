@@ -116,11 +116,18 @@ def _items(value: Any) -> list[Any]:
     return []
 
 
+# Целые поля пишутся в SQLite (INTEGER — 64 бита со знаком): число длиннее не id, а мусор, и запись упала бы.
+_INT_MAX = 2**63 - 1
+# Unix-время в секундах до 5138 года. Больше — миллисекунды (их шлют некоторые интеграции) или мусор.
+_MAX_UNIX_SECONDS = 10**11
+
+
 def _to_int(value: Any) -> int | None:
     try:
-        return int(str(value).strip())
+        number = int(str(value).strip())
     except (TypeError, ValueError):
         return None
+    return number if -_INT_MAX - 1 <= number <= _INT_MAX else None
 
 
 def _to_str(value: Any) -> str | None:
@@ -132,9 +139,14 @@ def _to_str(value: Any) -> str | None:
 
 def _to_datetime(value: Any) -> datetime:
     timestamp = _to_int(value)
-    if timestamp is None or timestamp <= 0:
+    if timestamp is not None and timestamp > _MAX_UNIX_SECONDS:
+        timestamp //= 1000
+    if timestamp is None or timestamp <= 0 or timestamp > _MAX_UNIX_SECONDS:
         return datetime.now(UTC)
-    return datetime.fromtimestamp(timestamp, UTC)
+    try:
+        return datetime.fromtimestamp(timestamp, UTC)
+    except (OverflowError, OSError, ValueError):  # на Windows — уже после 3000 года
+        return datetime.now(UTC)
 
 
 # ---------- События ----------

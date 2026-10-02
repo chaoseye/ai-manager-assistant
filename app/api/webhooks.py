@@ -36,7 +36,8 @@ async def amocrm_webhook(secret: str, request: Request) -> dict[str, Any]:
         logger.warning("webhook_bad_format", extra={"fields": {"error": str(exc), "size": len(body)}})
         return {"ok": True, "accepted": 0}
 
-    if settings.amocrm_account_id and batch.account_id and batch.account_id != settings.amocrm_account_id:
+    # Аккаунт закреплён — посылка без account[id] тоже чужая: amoCRM всегда его передаёт.
+    if settings.amocrm_account_id and batch.account_id != settings.amocrm_account_id:
         logger.warning(
             "webhook_foreign_account",
             extra={"fields": {"account_id": batch.account_id, "expected": settings.amocrm_account_id}},

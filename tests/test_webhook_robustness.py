@@ -110,14 +110,21 @@ def test_encode_parse_roundtrip(data):
 # ---------- Граничные значения полей ----------
 
 
-@pytest.mark.xfail(strict=True, reason="created_at в миллисекундах роняет разбор — ответ 500")
 def test_created_at_in_milliseconds(hook):
     assert post(hook, body(item(created_at="1790600000000"))).status_code == 200
 
 
-@pytest.mark.xfail(strict=True, reason="contact_id длиннее 19 цифр роняет запись в SQLite — ответ 500")
+def test_created_at_in_milliseconds_keeps_the_time():
+    in_seconds = parse_webhook(body(item(created_at="1790600000")), None).messages[0].created_at
+    in_millis = parse_webhook(body(item(created_at="1790600000123")), None).messages[0].created_at
+    assert in_millis == in_seconds
+
+
 def test_huge_contact_id(hook):
-    assert post(hook, body(item(contact_id="9" * 25))).status_code == 200
+    # Число длиннее 64 бит — не id: поле отбрасывается, сообщение с chat_id всё равно принимается.
+    response = post(hook, body(item(contact_id="9" * 25)))
+    assert response.status_code == 200 and response.json()["accepted"] == 1
+    assert parse_webhook(body(item(contact_id="9" * 25)), None).messages[0].contact_id is None
 
 
 def test_created_at_garbage(hook):
@@ -125,7 +132,6 @@ def test_created_at_garbage(hook):
         assert post(hook, body(item(id=f"m-{value}", created_at=value))).status_code == 200
 
 
-@pytest.mark.xfail(strict=True, reason="при заданном AMOCRM_ACCOUNT_ID посылка без account[id] принимается")
 def test_missing_account_is_ignored_when_account_is_pinned(hook):
     assert post(hook, body(item(), account=False)).json()["accepted"] == 0
 

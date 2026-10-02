@@ -83,9 +83,10 @@ REPLIES_NOTE = "Реплики, отправленные уже после со�
 ROLE_LABELS = {"client": "Клиент", "manager": "Менеджер", "bot": "Бот"}
 
 # Теги разметки промпта. В пользовательском тексте их «ломаем», чтобы клиент не мог закрыть
-# <new_message> и дописать свои «инструкции» от имени системы.
+# <new_message> и дописать свои «инструкции» от имени системы. Пробелы внутри («</ new_message>»)
+# модель тоже читает как тег.
 _OWN_TAGS_RE = re.compile(
-    r"<(/?)(knowledge_base|kb_item|tone_of_voice|lead|history|new_message|replies|task|response_format)\b",
+    r"<\s*(/?)\s*(knowledge_base|kb_item|tone_of_voice|lead|history|new_message|replies|task|response_format)\b",
     re.IGNORECASE,
 )
 
@@ -124,7 +125,9 @@ def _render_lead(lead: LeadContext | None, channel: str | None) -> str:
 def _render_message(message: DialogMessage) -> str:
     label = ROLE_LABELS[message.role]
     if message.author_name and message.role != "client":
-        label += f" ({message.author_name})"
+        # Имя приходит из amoCRM как есть: без переносов строк и тегов, иначе оно изображает новую реплику
+        # или закрывает <history>.
+        label += f" ({neutralize_tags(' '.join(message.author_name.split()))})"
     stamp = f"[{message.ts:%Y-%m-%d %H:%M}] " if message.ts else ""
     return f"{stamp}{label}: {neutralize_tags(message.text)}"
 
