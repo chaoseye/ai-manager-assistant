@@ -288,7 +288,7 @@ def test_default_retry_window_is_about_a_minute():
     assert 50 <= sum(setup_webhook.INVALID_URL_RETRY_DELAYS) <= 90
 
 
-def test_setup_webhook_cli_warns_about_late_first_delivery(tmp_path, monkeypatch, capsys):
+def test_setup_webhook_cli_reports_retries_and_asks_for_probe(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(setup_webhook, "get_settings", lambda: live_settings(tmp_path))
 
     async def ok(*args, **kwargs):
@@ -305,11 +305,12 @@ def test_setup_webhook_cli_warns_about_late_first_delivery(tmp_path, monkeypatch
     assert "Вебхук зарегистрирован: https://abc.lhr.life/webhooks/amocrm/***" in out
     assert HOOK_SECRET not in out + err
     assert "повтор через 5 с (попытка 2 из 5)" in err
-    assert "могут опаздывать на несколько минут" in err
+    assert "пробное сообщение" in out
 
     async def register_first_try(public_url, settings, *args, **kwargs):
         return setup_webhook.webhook_destination(public_url, settings)
 
     monkeypatch.setattr(setup_webhook, "register", register_first_try)
     assert setup_webhook.main(["https://abc.lhr.life"]) == 0
-    assert "опаздывать" not in capsys.readouterr().err
+    out, err = capsys.readouterr()
+    assert "повтор" not in err and "пробное сообщение" in out
