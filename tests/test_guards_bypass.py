@@ -82,6 +82,11 @@ def test_guards_invariants(kb, suggestion, message, mode):
         assert result.client_reply == "" and result.kb_refs == []
     if "price_not_in_kb" in codes(warnings):
         assert result.needs_human
+    # Фрагмент предупреждения дословно есть в тексте своего блока — иначе страница не подсветит место.
+    texts = {"client_reply": result.client_reply, "upsell": f"{result.upsell.offer}\n{result.upsell.pitch}"}
+    for warning in warnings:
+        if warning.fragment is not None:
+            assert warning.field is not None and warning.fragment in texts[warning.field], warning
     # Повторный прогон ничего не меняет в самом результате.
     again, _ = apply_guards(result, kb, request, mode)
     assert again == result

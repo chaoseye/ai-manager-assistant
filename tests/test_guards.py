@@ -294,3 +294,66 @@ def test_amounts_are_regrouped_in_reply(kb):
     result, warnings = apply_guards(suggestion, kb, REQUEST, "full")
     assert result.client_reply == "Стандартный монтаж стоит 9 900 ₽. Когда вам удобно?"
     assert warnings == []
+
+
+# ---------- Где в тексте проблема: по field и fragment страница подсвечивает место ----------
+
+
+def flags(warnings):
+    return [(w.code, w.field, w.fragment) for w in warnings]
+
+
+def test_wrong_price_and_total_point_to_their_place(kb):
+    reply = "Павел, Inverter 12 стоит 52 900 ₽, стандартный монтаж — 9 900 ₽, итого 62 800 ₽."
+    _, warnings = apply_guards(make_suggestion(client_reply=reply), kb, REQUEST, "full")
+    assert flags(warnings) == [
+        ("price_not_in_kb", "client_reply", "52 900 ₽"),
+        ("price_not_in_kb", "client_reply", "62 800 ₽"),
+    ]
+
+
+def test_regrouped_amount_points_to_text_after_regrouping(kb):
+    result, warnings = apply_guards(make_suggestion(client_reply="Монтаж — 31900 руб."), kb, REQUEST, "full")
+    assert result.client_reply == "Монтаж — 31 900 руб."
+    assert warnings[0].fragment == "31 900 руб." and warnings[0].fragment in result.client_reply
+
+
+def test_forbidden_phrase_points_to_its_spelling_in_text(kb):
+    suggestion = make_suggestion(
+        client_reply="Дешевле нигде не найдете! Уважаемый клиент, монтаж 9 900 ₽.",
+        upsell={"pitch": "Как я уже говорила, обслуживание выгодно"},
+    )
+    _, warnings = apply_guards(suggestion, kb, REQUEST, "full")
+    assert sorted(f for f in flags(warnings) if f[0] == "forbidden_phrase") == [
+        ("forbidden_phrase", "client_reply", "Дешевле нигде не найдете"),
+        ("forbidden_phrase", "client_reply", "Уважаемый клиент"),
+        ("forbidden_phrase", "upsell", "Как я уже говорила"),
+    ]
+
+
+def test_terms_and_internal_terms_point_to_their_place(kb):
+    reply = "Монтаж для вас бесплатный, а на оборудование скидка 15%. Это по нашей базе знаний."
+    _, warnings = apply_guards(make_suggestion(client_reply=reply), kb, REQUEST, "full")
+    assert ("terms_not_in_kb", "client_reply", "15%") in flags(warnings)
+    assert ("internal_terms", "client_reply", "базе знаний") in flags(warnings)
+    [free] = [w for w in warnings if w.code == "terms_not_in_kb" and w.fragment != "15%"]
+    assert free.fragment == "Монтаж для вас бесплатный, а на оборудование скидка 15%."  # всё предложение
+
+
+def test_upsell_warnings_point_to_upsell(kb):
+    suggestion = make_suggestion(
+        upsell={
+            "recommended": True,
+            "timing": "now",
+            "product_ids": ["service-1y"],
+            "pitch": "Всего 2 222 ₽!",
+        }
+    )
+    _, warnings = apply_guards(suggestion, kb, REQUEST, "full")
+    assert flags(warnings) == [("upsell_price_not_in_kb", "upsell", "2 222 ₽")]
+
+
+def test_warnings_without_place_have_no_fragment(kb):
+    suggestion = make_suggestion(kb_refs=["faq-teleport"], answer_found_in_kb=True)
+    _, warnings = apply_guards(suggestion, kb, REQUEST, "full")
+    assert flags(warnings) == [("unknown_kb_ref", None, None), ("no_kb_refs", "client_reply", None)]
