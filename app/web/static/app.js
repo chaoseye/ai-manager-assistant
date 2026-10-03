@@ -218,17 +218,86 @@ function addKv(list, key, value, cls) {
   list.append(el("dt", { text: key }), el("dd", cls ? { class: cls, text: value } : { text: value }));
 }
 
+// Предупреждения проверок по блокам: про черновик, про допродажу и про результат в целом.
+function warningsFor(meta, field) {
+  return meta.warnings.filter((w) => (w.field || null) === field);
+}
+
+function marksOf(warnings) {
+  return warnings.filter((w) => w.fragment).map((w) => ({ fragment: w.fragment, title: w.message }));
+}
+
+// Абзацы черновика без пустых строк между ними: так блок допродажи чаще помещается в первый экран.
+// Вставка и копирование берут исходный текст.
+function replyParagraphs(text, marks) {
+  const box = document.createDocumentFragment();
+  for (const part of text.split(/\n[^\S\n]*\n\s*/)) {
+    if (part.trim()) box.append(el("span", { class: "para" }, highlighted(part.trim(), marks)));
+  }
+  return box;
+}
+
+// ---------- Плашка допродажи у края панели ----------
+// Если черновик длинный (или это телефон), блок допродажи уходит ниже края — плашка напоминает о нём.
+
+// Блок допродажи виден меньше чем на треть и он ниже края, а не выше: зритель его ещё не видел.
+// Видимая область — экран, а на компьютере ещё и панель подсказки со своей прокруткой.
+function upsellBelowEdge() {
+  const rect = document.querySelector(".block-upsell").getBoundingClientRect();
+  if (!rect.height) return false;
+  const panel = $("tab-suggestion").getBoundingClientRect();
+  const top = Math.max(panel.top, 0);
+  const bottom = Math.min(panel.bottom, window.innerHeight);
+  const visible = Math.max(0, Math.min(rect.bottom, bottom) - Math.max(rect.top, top));
+  return rect.top > top && visible < rect.height * 0.3;
+}
+
+function updateUpsellPeek() {
+  const typing = document.activeElement && ["INPUT", "TEXTAREA"].includes(document.activeElement.tagName);
+  $("upsell-peek").hidden = $("suggestion").hidden || typing || !upsellBelowEdge();
+}
+
+function watchUpsell() {
+  let frame = 0;
+  const schedule = () => {
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(updateUpsellPeek);
+  };
+  // Прокрутка и страницы, и панели подсказки (capture — scroll не всплывает), смена размера, фокус.
+  document.addEventListener("scroll", schedule, { capture: true, passive: true });
+  window.addEventListener("resize", schedule);
+  document.addEventListener("focusin", updateUpsellPeek);
+  document.addEventListener("focusout", updateUpsellPeek);
+  $("upsell-peek").addEventListener("click", () => {
+    const smooth = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+    document.querySelector(".block-upsell").scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "nearest" });
+  });
+}
+
+function renderWarningList(list, warnings) {
+  list.replaceChildren(...warnings.map((w) => el("li", { text: w.message })));
+  list.hidden = !warnings.length;
+}
+
 function renderSuggestion({ suggestion: s, meta }) {
   $("suggestion").hidden = false;
   $("stale").hidden = true;
+  $("insert-confirm").hidden = true;
 
   const upsellOnly = meta.mode === "upsell_only";
-  $("reply-text").textContent = upsellOnly ? "Менеджер уже ответил — черновик не нужен." : keepAmounts(s.client_reply);
+  const replyWarnings = warningsFor(meta, "client_reply");
+  // Ошибочная цена или обещание — прямо в тексте черновика, а не только списком ниже допродажи.
+  $("reply-text").replaceChildren(
+    upsellOnly ? "Менеджер уже ответил — черновик не нужен." : replyParagraphs(s.client_reply, marksOf(replyWarnings)),
+  );
+  renderWarningList($("reply-warnings"), upsellOnly ? [] : replyWarnings);
   $("needs-human").hidden = !s.needs_human;
   $("needs-human-reason").hidden = !s.needs_human;
   $("needs-human-reason").textContent = keepAmounts(s.needs_human_reason) || "Проверьте ответ перед отправкой.";
   $("insert-reply").disabled = upsellOnly || !s.client_reply;
   $("copy-reply").disabled = upsellOnly || !s.client_reply;
+  // С отмеченными местами вставка — не главное действие: сначала подтверждение, что их исправят.
+  $("insert-reply").classList.toggle("btn-primary", !marksOf(replyWarnings).length);
 
   const refs = $("kb-refs");
   refs.replaceChildren();
@@ -244,23 +313,31 @@ function renderSuggestion({ suggestion: s, meta }) {
   const pill = $("upsell-timing");
   pill.textContent = u.recommended ? timing.label : "не предлагать";
   pill.className = `pill ${u.recommended ? timing.cls : "pill-no"}`;
+  $("upsell-peek-text").textContent = keepAmounts(u.recommended && u.offer ? `${pill.textContent}: ${u.offer}` : pill.textContent);
 
+  const upsellWarnings = warningsFor(meta, "upsell");
+  const upsellMarks = marksOf(upsellWarnings);
   const body = $("upsell-body");
   body.replaceChildren();
   if (u.recommended) {
-    addKv(body, "Что", u.offer);
+    if (u.offer) body.append(el("dt", { text: "Что" }), el("dd", {}, highlighted(u.offer, upsellMarks)));
     addKv(body, "Товары", u.product_ids.join(", "));
     addKv(body, "Почему", u.reason);
-    addKv(body, "Фраза", u.pitch ? `«${u.pitch}»` : "", "pitch");
+    if (u.pitch) {
+      body.append(el("dt", { text: "Фраза" }), el("dd", { class: "pitch" }, "«", highlighted(u.pitch, upsellMarks), "»"));
+    }
   } else {
     addKv(body, "Почему нет", u.reason);
   }
   addKv(body, "Не делать", u.avoid);
+  renderWarningList($("upsell-warnings"), upsellWarnings);
   $("copy-pitch").disabled = !u.recommended || !u.pitch;
 
-  const warnings = $("warnings");
-  warnings.replaceChildren(...meta.warnings.map((w) => el("li", { text: w.message })));
-  $("warnings-block").hidden = !meta.warnings.length;
+  // Внизу — только то, что не относится ни к черновику, ни к допродаже (например, запасная модель).
+  const general = warningsFor(meta, null);
+  renderWarningList($("warnings"), general);
+  $("warnings-block").hidden = !general.length;
+  updateUpsellPeek();
 
   const metaList = $("meta");
   metaList.replaceChildren();
@@ -275,11 +352,28 @@ function renderSuggestion({ suggestion: s, meta }) {
   addKv(metaList, "id подсказки", meta.suggestion_id);
 }
 
+// Черновик — в поле ввода от имени менеджера. Если в нём отмечены места, курсор выделяет первое из них.
+function insertReply() {
+  $("insert-confirm").hidden = true;
+  const reply = state.suggestion.suggestion.client_reply;
+  setRole("manager");
+  const input = $("input");
+  input.value = reply;
+  input.focus();
+  const places = marksOf(warningsFor(state.suggestion.meta, "client_reply"))
+    .map(({ fragment }) => ({ start: reply.indexOf(fragment), length: fragment.length }))
+    .filter(({ start }) => start !== -1)
+    .sort((a, b) => a.start - b.start);
+  if (places.length) input.setSelectionRange(places[0].start, places[0].start + places[0].length);
+}
+
 function resetSuggestion(text) {
   state.suggestion = null;
   state.suggestionForIndex = -1;
   $("suggestion").hidden = true;
   $("stale").hidden = true;
+  $("insert-confirm").hidden = true;
+  updateUpsellPeek();
   setStatus(text, "muted");
 }
 
@@ -546,10 +640,17 @@ function init() {
 
   $("insert-reply").addEventListener("click", () => {
     if (!state.suggestion) return;
-    setRole("manager");
-    const input = $("input");
-    input.value = state.suggestion.suggestion.client_reply;
-    input.focus();
+    if (marksOf(warningsFor(state.suggestion.meta, "client_reply")).length) {
+      $("insert-confirm").hidden = false;
+      $("insert-confirm-yes").focus();
+      return;
+    }
+    insertReply();
+  });
+  $("insert-confirm-yes").addEventListener("click", insertReply);
+  $("insert-confirm-no").addEventListener("click", () => {
+    $("insert-confirm").hidden = true;
+    $("insert-reply").focus();
   });
   $("copy-reply").addEventListener("click", () => state.suggestion && copyText(state.suggestion.suggestion.client_reply));
   $("copy-pitch").addEventListener("click", () => state.suggestion && copyText(state.suggestion.suggestion.upsell.pitch));
@@ -565,6 +666,7 @@ function init() {
   }
   if ($("live-demo")) initLiveDemo();
   initApiToken();
+  watchUpsell();
 
   $("scenario-select").addEventListener("change", (event) => applyScenario(event.target.value));
   $("new-dialog").addEventListener("click", () => {

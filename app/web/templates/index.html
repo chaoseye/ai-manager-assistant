@@ -63,25 +63,35 @@
         <article class="block">
           <header class="block-head">
             <h2>Ответ клиенту</h2>
-            <span id="needs-human" class="pill pill-warn" hidden>Нужна проверка</span>
+            <div class="block-tools">
+              <span id="needs-human" class="pill pill-warn" hidden>Нужна проверка</span>
+              <button type="button" id="regenerate" class="btn btn-ghost btn-small">Перегенерировать</button>
+            </div>
           </header>
           <p id="reply-text" class="reply"></p>
           <p id="needs-human-reason" class="note" hidden></p>
+          <ul id="reply-warnings" class="warnings flags" aria-label="Что проверить в черновике" hidden></ul>
           <div id="kb-refs" class="chips" aria-label="Основано на записях базы знаний"></div>
           <div class="actions">
             <button type="button" id="insert-reply" class="btn btn-primary">Вставить в поле ввода</button>
             <button type="button" id="copy-reply" class="btn">Копировать</button>
-            <button type="button" id="regenerate" class="btn btn-ghost">Перегенерировать</button>
+          </div>
+          <div id="insert-confirm" class="confirm" role="alertdialog" aria-labelledby="insert-confirm-text" hidden>
+            <p id="insert-confirm-text" class="small">В черновике отмечено то, чего нет в базе знаний. После вставки курсор встанет на первое отмеченное место — исправьте его перед отправкой.</p>
+            <div class="actions">
+              <button type="button" id="insert-confirm-yes" class="btn btn-primary">Вставить и исправить</button>
+              <button type="button" id="insert-confirm-no" class="btn btn-ghost">Отмена</button>
+            </div>
           </div>
         </article>
 
         <article class="block block-upsell">
           <header class="block-head">
-            <h2>Допродажа</h2>
+            <h2>Допродажа <span class="muted small" title="Клиент этот блок не видит">· для менеджера</span></h2>
             <span id="upsell-timing" class="pill"></span>
           </header>
-          <p class="muted small">Видит только менеджер</p>
           <dl id="upsell-body" class="kv"></dl>
+          <ul id="upsell-warnings" class="warnings flags" aria-label="Что проверить в допродаже" hidden></ul>
           <div class="actions">
             <button type="button" id="copy-pitch" class="btn">Копировать фразу</button>
           </div>
@@ -96,6 +106,13 @@
           <summary>Технические данные</summary>
           <dl id="meta" class="kv"></dl>
         </details>
+
+        <!-- Видна, пока сам блок допродажи ниже края панели (длинный черновик, телефон). -->
+        <button type="button" id="upsell-peek" class="upsell-peek" hidden>
+          <span class="upsell-peek-label">Допродажа</span>
+          <span id="upsell-peek-text" class="upsell-peek-text"></span>
+          <span aria-hidden="true">↓</span>
+        </button>
       </div>
     </div>
 

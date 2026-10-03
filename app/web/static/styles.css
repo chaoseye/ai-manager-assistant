@@ -231,12 +231,18 @@ textarea:focus, input:focus, select:focus, .btn:focus-visible, .tab:focus-visibl
 }
 
 .block {
-  border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 12px;
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 10px;
 }
 .block-upsell { border-color: var(--upsell); background: var(--upsell-soft); }
 .block-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.block-tools { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.block-tools .btn-small { padding: 2px 6px; }
 .block h2 { font-size: 15px; margin: 0; }
-.reply { white-space: pre-wrap; margin: 10px 0; }
+.block h2 .small { font-weight: 400; }
+.reply { white-space: pre-wrap; margin: 8px 0; }
+/* Абзацы без пустой строки между ними — черновик короче, допродажа ближе к первому экрану. */
+.reply .para { display: block; }
+.reply .para + .para { margin-top: 6px; }
 .note { font-size: 13px; color: var(--warn); background: var(--warn-soft); padding: 6px 8px; border-radius: 6px; }
 
 .pill {
@@ -248,11 +254,24 @@ textarea:focus, input:focus, select:focus, .btn:focus-visible, .tab:focus-visibl
 .pill-later { background: var(--accent-soft); color: var(--accent); }
 .pill-no { background: var(--surface-2); color: var(--muted); }
 
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 10px; }
+.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 6px 0 4px; }
 .chip {
-  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  padding: 2px 6px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--border);
+  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  padding: 1px 5px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--border);
 }
+
+/* Плашка допродажи: на компьютере прилипает к нижнему краю панели подсказки, на телефоне — экрана. */
+.upsell-peek {
+  position: sticky; bottom: 0; z-index: 5; width: 100%;
+  display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 8px 12px;
+  font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+  color: var(--text); background: var(--upsell-soft); border: 1px solid var(--upsell); border-radius: 8px;
+  box-shadow: 0 -4px 12px rgba(16, 24, 40, 0.12);
+}
+.upsell-peek:hover { filter: brightness(1.04); }
+.upsell-peek:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.upsell-peek-label { font-weight: 600; color: var(--upsell); white-space: nowrap; }
+.upsell-peek-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 
@@ -262,6 +281,20 @@ textarea:focus, input:focus, select:focus, .btn:focus-visible, .tab:focus-visibl
 .kv .pitch { font-style: italic; }
 
 .warnings { margin: 8px 0 0; padding-left: 18px; font-size: 14px; color: var(--warn); }
+.warnings.flags { color: var(--danger); font-size: 13px; display: grid; gap: 2px; }
+
+/* Место, которое проверки не подтвердили: ошибочная цена, обещание, стоп-фраза. */
+mark.flag {
+  color: inherit; background: var(--danger-soft); border-radius: 3px; padding: 0 2px;
+  text-decoration: underline wavy var(--danger); text-decoration-thickness: 1px; text-underline-offset: 3px;
+  cursor: help;
+}
+
+.confirm {
+  margin-top: 10px; padding: 10px 12px; border-radius: 8px;
+  background: var(--warn-soft); border: 1px solid var(--warn);
+}
+.confirm p { margin: 0; color: var(--text); }
 
 .meta summary { cursor: pointer; font-size: 14px; color: var(--muted); }
 .meta .kv { font-size: 13px; font-variant-numeric: tabular-nums; }
@@ -328,4 +361,9 @@ textarea:focus, input:focus, select:focus, .btn:focus-visible, .tab:focus-visibl
   .assistant { min-height: 60vh; }
   .msg { max-width: 92%; }
   .topbar { padding: 10px 16px; }
+  /* Подсказка на телефоне под чатом: плашка внизу экрана говорит, что она готова. */
+  .upsell-peek {
+    position: fixed; left: 16px; right: 16px; width: auto;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
 }
