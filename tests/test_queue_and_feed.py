@@ -1,7 +1,5 @@
 """Очередь и лента страницы «amoCRM (mock)»: параллельные проходы, запоздавшие сообщения, несколько чатов
 одной сделки, настройки очереди.
-
-xfail(strict=True) — известный недочёт (см. шапку test_money_pii_props.py).
 """
 
 import asyncio
@@ -46,16 +44,49 @@ async def test_many_dialogs_respect_concurrency(env):  # noqa: F811
     assert len(env.fake.list_notes("leads", 1234)) == 10
 
 
-@pytest.mark.xfail(strict=True, reason="WORKER_CONCURRENCY=0 принимается — очередь молча не работает")
 def test_zero_concurrency_is_rejected(tmp_path):
     with pytest.raises(ValidationError):
         make_settings(tmp_path, worker_concurrency=0)
 
 
-@pytest.mark.xfail(strict=True, reason="отрицательные DEBOUNCE_SECONDS и RETENTION_DAYS принимаются")
 def test_negative_timings_are_rejected(tmp_path):
     with pytest.raises(ValidationError):
         make_settings(tmp_path, debounce_seconds=-5, retention_days=-1)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"debounce_seconds": -5},
+        {"retention_days": 0},
+        {"worker_poll_seconds": 0},
+        {"job_max_attempts": 0},
+        {"job_retry_seconds": -1},
+        {"llm_timeout_seconds": 0},
+        {"amocrm_timeout_seconds": 0},
+        {"llm_max_tokens": 0},
+        {"history_limit": -1},
+        {"live_demo_daily_limit": -1},
+        {"amocrm_rps": -1},
+    ],
+)
+def test_broken_numbers_are_rejected(tmp_path, bad):
+    with pytest.raises(ValidationError):
+        make_settings(tmp_path, **bad)
+
+
+def test_zero_where_it_means_something_is_allowed(tmp_path):
+    # Пауза 0 — сразу генерировать, повтор через 0 с, 0 запросов/с — без ограничения, лимит 0 — живая модель
+    # закрыта, история 0 — без истории.
+    settings = make_settings(
+        tmp_path,
+        debounce_seconds=0,
+        job_retry_seconds=0,
+        amocrm_rps=0,
+        live_demo_daily_limit=0,
+        history_limit=0,
+    )
+    assert settings.debounce_seconds == 0 and settings.amocrm_rps == 0
 
 
 # ---------- Лента страницы «amoCRM (mock)» ----------

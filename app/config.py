@@ -5,7 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal, get_args
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -35,8 +35,8 @@ class Settings(BaseSettings):
     llm_fallback_providers: Annotated[list[ProviderId], NoDecode] = []
     llm_model: str = "claude-opus-5-5"  # Claude через Anthropic API
     llm_effort: Effort = "medium"
-    llm_max_tokens: int = 8000
-    llm_timeout_seconds: float = 60.0
+    llm_max_tokens: int = Field(8000, ge=1)
+    llm_timeout_seconds: float = Field(60.0, gt=0)
     llm_fallbacks: bool = True  # серверный fallback Anthropic API
     anthropic_api_key: str | None = None
 
@@ -54,7 +54,7 @@ class Settings(BaseSettings):
 
     # Ядро
     kb_dir: Path = Path("knowledge_base")
-    history_limit: int = 20
+    history_limit: int = Field(20, ge=0)
     pii_masking: bool = True
     upsell_in_reply: bool = False
 
@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     # Живая модель за паролем на публичном стенде: при LLM_MODE=mock все видят записанные ответы,
     # а кто ввёл пароль на странице — ответы живых моделей (нужен шлюз или ключ Anthropic).
     live_demo_password: str | None = None
-    live_demo_daily_limit: int = 200  # живых запросов в сутки на один экземпляр сервиса
+    live_demo_daily_limit: int = Field(200, ge=0)  # живых запросов в сутки на один экземпляр сервиса
     # Брать адрес клиента для защиты пароля от подбора из X-Forwarded-For. Только за прокси, который сам
     # ставит этот заголовок (Vercel перезаписывает его, nginx дописывает справа): иначе клиент подменит
     # заголовок и обойдёт блокировку. Без прокси адрес берётся из соединения.
@@ -85,8 +85,8 @@ class Settings(BaseSettings):
     amocrm_base_url: str | None = None  # по умолчанию https://{subdomain}.amocrm.ru
     amocrm_account_id: int | None = None
     amocrm_token: str | None = None
-    amocrm_rps: float = 5.0
-    amocrm_timeout_seconds: float = 15.0
+    amocrm_rps: float = Field(5.0, ge=0)  # 0 — без ограничения
+    amocrm_timeout_seconds: float = Field(15.0, gt=0)
     amocrm_mock_seed: Path = Path("examples/amocrm/mock_account.json")
     webhook_secret: str | None = None
     note_service_name: str = "AI-помощник"
@@ -96,13 +96,15 @@ class Settings(BaseSettings):
     # Обрабатывать созревшие задачи, когда страница «amoCRM (mock)» запрашивает ленту.
     # Нужно там, где фоновый цикл не работает (Vercel).
     worker_on_request: bool = ON_VERCEL
-    worker_concurrency: int = 3
-    worker_poll_seconds: float = 0.5
-    debounce_seconds: float = 6.0
+    # Ноль или отрицательное число здесь — тихая поломка: очередь стоит, пауза пропадает, очистка удаляет
+    # всё сразу. Поэтому такие значения не дают сервису стартовать.
+    worker_concurrency: int = Field(3, ge=1)
+    worker_poll_seconds: float = Field(0.5, gt=0)
+    debounce_seconds: float = Field(6.0, ge=0)
     on_manager_replied: Literal["upsell_only", "skip"] = "upsell_only"
-    job_max_attempts: int = 3
-    job_retry_seconds: float = 60.0
-    retention_days: int = 30
+    job_max_attempts: int = Field(3, ge=1)
+    job_retry_seconds: float = Field(60.0, ge=0)
+    retention_days: int = Field(30, ge=1)
 
     @field_validator(
         "anthropic_api_key",

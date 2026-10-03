@@ -19,7 +19,7 @@ from app.config import PROVIDER_IDS, get_settings
 from app.core.assistant import Assistant
 from app.core.llm import LLMError
 from app.core.llm_registry import build_llms
-from app.core.schemas import DialogMessage, LeadContext, SuggestRequest, SuggestResult
+from app.core.schemas import DialogMessage, LeadContext, SuggestRequest, SuggestResult, has_visible_text
 from app.kb.loader import KBValidationError, KnowledgeStore
 from app.logging_setup import configure_logging
 
@@ -45,7 +45,7 @@ def _read_json(path: Path, what: str) -> Any:
 
 def build_request(args: argparse.Namespace) -> SuggestRequest:
     text = sys.stdin.read() if args.stdin else args.text
-    if not text or not text.strip():
+    if not text or not has_visible_text(text):
         raise InputError("Нужен текст обращения: аргументом или через --stdin")
     history: list[DialogMessage] = []
     lead: LeadContext | None = None

@@ -1,7 +1,4 @@
-"""HTTP API: защита живой модели, токен на демо-странице, заголовки, крайние входы.
-
-xfail(strict=True) — известный недочёт (см. шапку test_money_pii_props.py).
-"""
+"""HTTP API: защита живой модели, токен на демо-странице, заголовки, крайние входы."""
 
 import re
 
@@ -143,15 +140,25 @@ def test_json_responses_are_not_sniffed(client):
     assert "content-security-policy" not in headers
 
 
-@pytest.mark.xfail(strict=True, reason="429 приходит с кодом http_error")
 def test_429_has_specific_error_code(stand):
     for _ in range(6):
         response = stand.post("/api/v1/live/login", json={"password": "x"})
     assert response.status_code == 429
-    assert response.json()["error"]["code"] != "http_error"
+    assert response.json()["error"]["code"] == "too_many_requests"
 
 
-@pytest.mark.xfail(strict=True, reason="сообщение из невидимых символов считается непустым и уходит в модель")
+@pytest.mark.parametrize(
+    ("message", "status"),
+    [
+        ("﻿‍  ", 422),  # BOM, соединитель, неразрывные пробелы
+        ("​\n\t⁠", 422),
+        ("​?", 200),  # один видимый знак — уже обращение
+    ],
+)
+def test_invisible_characters_variants(client, message, status):
+    assert client.post("/api/v1/suggest", json={"message": message}).status_code == status
+
+
 def test_invisible_message_is_rejected(client):
     assert client.post("/api/v1/suggest", json={"message": "​​⁠"}).status_code == 422
 
