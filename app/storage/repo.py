@@ -177,6 +177,18 @@ class DialogRepo:
         await cursor.close()
         return inserted
 
+    async def has_newer_incoming(self, dialog_id: int, event: ChatMessageEvent) -> bool:
+        """Есть ли в диалоге сообщение клиента, написанное позже этого (по времени amoCRM)."""
+        rows = await self._db.conn.execute_fetchall(
+            """
+            SELECT 1 FROM messages
+            WHERE dialog_id = ? AND direction = 'in' AND amo_id != ? AND created_at > ?
+            LIMIT 1
+            """,
+            (dialog_id, event.id, to_iso(event.created_at)),
+        )
+        return bool(rows)
+
     async def add_note(self, dialog_id: int, note_id: int | None, now: datetime) -> None:
         """Запоминает примечание, записанное по диалогу (id нет — amoCRM его не вернул, запоминать нечего)."""
         if note_id is None:

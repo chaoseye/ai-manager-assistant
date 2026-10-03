@@ -3,10 +3,29 @@
 import contextvars
 import json
 import logging
+import re
 import sys
 from datetime import UTC, datetime
 
 request_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("request_id", default=None)
+
+# Секрет вебхука — часть пути (подписи у amoCRM нет). Журнал запросов uvicorn пишет путь целиком.
+_WEBHOOK_SECRET_RE = re.compile(r"(/webhooks/amocrm/)[^/?#\s\"]+")
+
+
+def mask_webhook_secret(text: str) -> str:
+    return _WEBHOOK_SECRET_RE.sub(r"\1***", text)
+
+
+class WebhookSecretFilter(logging.Filter):
+    """Заменяет секрет в пути вебхука на *** во всех аргументах записи журнала."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            record.msg = mask_webhook_secret(record.msg)
+        if isinstance(record.args, tuple):
+            record.args = tuple(mask_webhook_secret(a) if isinstance(a, str) else a for a in record.args)
+        return True
 
 
 class JsonFormatter(logging.Formatter):
@@ -36,3 +55,7 @@ def configure_logging(level: str) -> None:
     root.setLevel(level.upper())
     for noisy in ("httpx", "httpx2", "httpcore", "httpcore2", "anthropic"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+    # Журнал запросов uvicorn настраивает сам и пишет мимо корневого обработчика — фильтр вешаем на логгер.
+    access = logging.getLogger("uvicorn.access")
+    if not any(isinstance(f, WebhookSecretFilter) for f in access.filters):
+        access.addFilter(WebhookSecretFilter())

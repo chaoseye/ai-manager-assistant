@@ -10,9 +10,9 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
-from app.amocrm.client import AmoClient, AmoError, NoteEntity
+from app.amocrm.client import AmoChatEvent, AmoClient, AmoError, NoteEntity
 from app.amocrm.context import resolve_context
 from app.amocrm.notes import format_attachment_note, format_failure_note, format_suggestion_note
 from app.amocrm.webhooks import ELEMENT_LEAD, WebhookBatch
@@ -52,6 +52,11 @@ MAX_TEXT = 10_000
 MAX_HISTORY = 500
 MAX_REPLIES = 50
 CLEANUP_INTERVAL = timedelta(hours=24)
+# Ответ менеджера, известный только по журналу событий amoCRM: вебхук с текстом ещё не пришёл.
+UNSEEN_REPLY_TEXT = "(ответ отправлен, текст ещё не пришёл из amoCRM)"
+# Дальше в журнал не смотрим: недоставленный вебхук amoCRM повторяет через 5, 15, 15 минут и через час,
+# так что более старый ответ уже пришёл бы сам.
+UNSEEN_REPLY_WINDOW = timedelta(hours=2)
 
 
 # ---------- Разбор диалога ----------
@@ -89,6 +94,13 @@ def split_dialog(messages: list[StoredMessage]) -> DialogSplit | None:
     while start > 0 and messages[start - 1].direction == "in":
         start -= 1
     return DialogSplit(messages[:start], messages[start : last_in + 1], messages[last_in + 1 :])
+
+
+def merge_by_time(messages: list[StoredMessage], extra: list[StoredMessage]) -> list[StoredMessage]:
+    """Вставляет extra в переписку по времени amoCRM. При равном времени extra идёт раньше: ответ в ту же
+    секунду, что и сообщение клиента, не делает это сообщение отвеченным."""
+    extra_ids = {m.amo_id for m in extra}
+    return sorted([*messages, *extra], key=lambda m: (m.created_at, m.amo_id not in extra_ids))
 
 
 def _clip(text: str, limit: int = MAX_TEXT) -> str:
@@ -139,24 +151,34 @@ class Inbox:
         self._clock = clock
 
     async def ingest(self, batch: WebhookBatch) -> dict[str, int]:
-        """Пишет сообщения в историю. Каждое новое сообщение клиента ставит или сдвигает задачу диалога."""
+        """Пишет сообщения в историю. Новое сообщение клиента ставит или сдвигает задачу диалога.
+
+        Опоздавшее сообщение (amoCRM доставил его позже уже полученных более новых) только встаёт в историю:
+        задача по более новому сообщению его уже учла или учтёт, а новая подсказка почти повторила бы
+        прежнюю — лишний вызов модели и лишнее примечание в сделке.
+        """
         now = self._clock()
-        accepted = duplicates = scheduled = 0
+        accepted = duplicates = scheduled = late = 0
         for event in batch.messages:
             dialog_id = await self._dialogs.upsert(event, now)
             if not await self._dialogs.add_message(dialog_id, event, now):
                 duplicates += 1
                 continue
             accepted += 1
-            if event.direction == "in":
-                run_at = now + timedelta(seconds=self._settings.debounce_seconds)
-                await self._jobs.schedule(dialog_id, event.id, run_at, now)
-                scheduled += 1
+            if event.direction != "in":
+                continue
+            if await self._dialogs.has_newer_incoming(dialog_id, event):
+                late += 1
+                continue
+            run_at = now + timedelta(seconds=self._settings.debounce_seconds)
+            await self._jobs.schedule(dialog_id, event.id, run_at, now)
+            scheduled += 1
         await self._db.commit()
         result = {
             "accepted": accepted,
             "duplicates": duplicates,
             "scheduled": scheduled,
+            "late": late,
             "skipped": len(batch.skipped),
         }
         logger.info("webhook_ingested", extra={"fields": result})
@@ -304,18 +326,17 @@ class Worker:
         if dialog is None:
             return JOB_FAILED, "диалог не найден"
         state.fallback_target = self._dialog_target(dialog)
-        split = split_dialog(await self.dialogs.messages(dialog.id))
+        messages = await self.dialogs.messages(dialog.id)
+        split = split_dialog(messages)
         if split is None:
             return JOB_SKIPPED, "в диалоге нет сообщений клиента"
         if not split.has_text and not split.has_attachment:
             return JOB_SKIPPED, "в сообщении клиента нет видимого текста"
 
-        mode: Mode = "full"
-        if split.manager_replied:
-            if self.settings.on_manager_replied == "skip":
-                return JOB_SKIPPED, "менеджер уже ответил"
-            mode = "upsell_only"
-        state.details["mode"] = mode
+        skip_on_reply = self.settings.on_manager_replied == "skip"
+        if split.manager_replied and skip_on_reply:
+            return JOB_SKIPPED, "менеджер уже ответил"
+        state.details["mode"] = "upsell_only" if split.manager_replied else "full"
 
         resolved = await resolve_context(
             self.amo,
@@ -329,6 +350,20 @@ class Worker:
             "/".join(map(str, resolved.note_target)) if resolved.note_target else None
         )
 
+        # Ответ менеджера, вебхук о котором amoCRM ещё не доставил, виден только в журнале событий. Он встаёт
+        # в переписку на своё место: новым обращением остаётся то, что клиент написал уже после него.
+        if not split.manager_replied and (split.has_text or skip_on_reply):
+            unseen = await self._unseen_replies(dialog, messages, since=split.run[0].created_at)
+            if unseen:
+                state.details["unseen_replies"] = len(unseen)
+                split = split_dialog(merge_by_time(messages, unseen)) or split
+                if split.manager_replied and skip_on_reply:
+                    return JOB_SKIPPED, "менеджер уже ответил (виден в журнале событий amoCRM)"
+                if not split.has_text and not split.has_attachment:
+                    return JOB_SKIPPED, "в сообщении клиента нет видимого текста"
+        mode: Mode = "upsell_only" if split.manager_replied else "full"
+        state.details["mode"] = mode
+
         if not split.has_text:
             if resolved.note_target is None:
                 return JOB_DONE, "вложение без текста; сделка и контакт не найдены"
@@ -341,10 +376,16 @@ class Worker:
         state.details["suggestion_id"] = result.meta.suggestion_id
 
         # Пока шла генерация, диалог мог измениться.
-        fresh = split_dialog(await self.dialogs.messages(dialog.id))
-        if fresh is not None and fresh.trigger_id != split.trigger_id:
+        fresh_messages = await self.dialogs.messages(dialog.id)
+        fresh = split_dialog(fresh_messages) or split
+        if fresh.trigger_id != split.trigger_id:
             return JOB_STALE, "пока шла генерация, клиент написал ещё — подсказка устарела"
-        include_reply = mode == "full" and not (fresh is not None and fresh.manager_replied)
+        include_reply = mode == "full" and not fresh.manager_replied
+        if include_reply and await self._unseen_replies(
+            dialog, fresh_messages, since=fresh.run[-1].created_at
+        ):
+            state.details["unseen_replies_after_generation"] = True
+            include_reply = False
 
         if resolved.note_target is None:
             return JOB_DONE, "сделка и контакт не найдены — примечание некуда записать"
@@ -378,6 +419,47 @@ class Worker:
         )
         await self.jobs.set_suggestion(job.id, result.meta.suggestion_id, split.trigger_id)
         return result
+
+    async def _unseen_replies(
+        self, dialog: Dialog, known: list[StoredMessage], *, since: datetime
+    ) -> list[StoredMessage]:
+        """Ответы сотрудника в этом чате позже since, которые есть в журнале событий amoCRM, а вебхуком
+        ещё не пришли. На живом аккаунте такие вебхуки приходили на 2–5 минут позже, а в журнале сообщение
+        видно сразу. Текста в журнале нет — вместо него пометка. Сбой журнала подсказке не мешает:
+        тогда работаем по вебхукам, как раньше.
+        """
+        known_ids = {m.amo_id for m in known}
+        since = max(since, self.clock() - UNSEEN_REPLY_WINDOW)
+        try:
+            # Время в журнале — в секундах; ответ в ту же секунду, что и сообщение, — не ответ на него.
+            events = await self.amo.get_outgoing_chat_events(int(since.timestamp()) + 1)
+        except AmoError as exc:
+            logger.warning(
+                "amocrm_events_unavailable", extra={"fields": {"dialog_id": dialog.id, "error": str(exc)}}
+            )
+            return []
+        return [
+            StoredMessage(
+                amo_id=event.message_id,
+                direction="out",
+                author_type="user",
+                author_name=None,
+                text=UNSEEN_REPLY_TEXT,
+                attachment_type=None,
+                created_at=datetime.fromtimestamp(event.created_at, UTC),
+            )
+            for event in events
+            if event.by_user and event.message_id not in known_ids and self._same_chat(event, dialog)
+        ]
+
+    @classmethod
+    def _same_chat(cls, event: AmoChatEvent, dialog: Dialog) -> bool:
+        if dialog.talk_id and event.talk_id:
+            return event.talk_id == dialog.talk_id
+        # Без номера беседы — по сделке или контакту чата: в сделке бывает и несколько чатов, но это лучше,
+        # чем не заметить ответ.
+        target = cls._dialog_target(dialog)
+        return target is not None and (event.entity_type, event.entity_id) == (target[0][:-1], target[1])
 
     @staticmethod
     def _dialog_target(dialog: Dialog) -> tuple[NoteEntity, int] | None:

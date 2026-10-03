@@ -38,6 +38,7 @@ class FakeAmoApi:
         self.leads = {lead["id"]: lead for lead in seed.get("leads", [])}
         self.notes: list[dict[str, Any]] = []
         self.webhooks: list[dict[str, Any]] = []
+        self.events: list[dict[str, Any]] = []  # журнал событий: пока только сообщения чатов
         self.requests: list[tuple[str, str]] = []
         self._lock = threading.Lock()
 
@@ -165,6 +166,9 @@ class FakeAmoApi:
                     created.append({"id": note_id, "entity_id": entity_id, "request_id": str(len(created))})
             return httpx.Response(200, json={"_embedded": {"notes": created}})
 
+        if method == "GET" and path == "/api/v4/events":
+            return self._events_response(request.url.params)
+
         if method == "POST" and path == "/api/v4/webhooks":
             payload = json.loads(request.content or b"{}")
             with self._lock:
@@ -175,8 +179,53 @@ class FakeAmoApi:
 
         return _problem(404, "Not Found", f"{method} {path} не поддерживается поддельным amoCRM")
 
+    def _events_response(self, params: httpx.QueryParams) -> httpx.Response:
+        """Как настоящий журнал: новые сверху, фильтр по типу (через запятую) и времени, страницы по limit."""
+        types = {t for t in params.get("filter[type]", "").split(",") if t}
+        since = int(params.get("filter[created_at][from]") or 0)
+        limit = min(int(params.get("limit") or 100), 100)
+        page = max(int(params.get("page") or 1), 1)
+        with self._lock:
+            events = [
+                e for e in self.events if (not types or e["type"] in types) and e["created_at"] >= since
+            ]
+        events.sort(key=lambda e: e["created_at"], reverse=True)
+        chunk = events[(page - 1) * limit : page * limit]
+        if not chunk:
+            return httpx.Response(204)
+        return httpx.Response(200, json={"_page": page, "_embedded": {"events": chunk}})
+
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)
+
+    def add_chat_event(
+        self,
+        message_id: str,
+        *,
+        talk_id: int | str | None,
+        created_at: int,
+        created_by: int,
+        outgoing: bool = True,
+        entity_type: str = "lead",
+        entity_id: int | None = None,
+    ) -> None:
+        """Запись журнала о сообщении в чате — в формате настоящего amoCRM (created_by 0 у бота)."""
+        with self._lock:
+            self.events.append(
+                {
+                    "id": f"evt-{len(self.events) + 1}",
+                    "type": "outgoing_chat_message" if outgoing else "incoming_chat_message",
+                    "entity_id": entity_id,
+                    "entity_type": entity_type,
+                    "created_by": created_by,
+                    "created_at": created_at,
+                    "value_after": [
+                        {"message": {"id": message_id, "origin": "telegram", "talk_id": talk_id}}
+                    ],
+                    "value_before": [],
+                    "account_id": self.account.get("id"),
+                }
+            )
 
     # ---------- Для просмотра в mock-режиме ----------
 
