@@ -28,6 +28,29 @@ function el(tag, props = {}, ...children) {
   return node;
 }
 
+// Текст, в котором отмечены места из предупреждений проверок: [{fragment, title}] → <mark>.
+// Ищем дословно в исходном тексте, неразрывные пробелы в суммах ставим уже при выводе.
+function highlighted(text, marks) {
+  const spans = [];
+  for (const { fragment, title } of marks) {
+    if (!fragment) continue;
+    for (let at = text.indexOf(fragment); at !== -1; at = text.indexOf(fragment, at + fragment.length)) {
+      spans.push({ start: at, end: at + fragment.length, title });
+    }
+  }
+  spans.sort((a, b) => a.start - b.start || b.end - a.end);
+  const result = document.createDocumentFragment();
+  let position = 0;
+  for (const span of spans) {
+    if (span.start < position) continue; // вложенное или пересекающееся место уже отмечено
+    if (span.start > position) result.append(keepAmounts(text.slice(position, span.start)));
+    result.append(el("mark", { class: "flag", title: span.title, text: text.slice(span.start, span.end) }));
+    position = span.end;
+  }
+  if (position < text.length) result.append(keepAmounts(text.slice(position)));
+  return result;
+}
+
 function formatTime(iso) {
   if (!iso) return "";
   const date = new Date(iso);

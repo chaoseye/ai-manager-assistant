@@ -280,6 +280,10 @@ Testovoe_O_Complex/
 
 `meta.provider` и `meta.model` — модель, которая фактически ответила: при срабатывании запасной модели или серверного fallback Anthropic они отличаются от выбранных.
 
+**Предупреждения проверок** в `meta.warnings`: `{"code", "message", "field", "fragment"}`. `field` — к чему относится предупреждение: `client_reply` (черновик), `upsell` (допродажа) или `null` (результат в целом, например запасная модель). `fragment` — дословный кусок текста этого блока, если место известно точно: сумма, процент, предложение-обещание, стоп-фраза. По ним демо-страница подсвечивает место в черновике.
+
+**Заголовки ответов.** Все ответы — `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, `Permissions-Policy` без камеры, микрофона, геолокации и оплаты. Страницы демо (`/`, `/amocrm`) — `Content-Security-Policy: default-src 'self'` без встроенного кода и `frame-ancestors 'none'`; остальной HTML (документация API, скрипты с CDN) — только `frame-ancestors 'none'` и `X-Frame-Options: DENY`.
+
 **Ошибки** возвращаются в едином формате `{"error": {"code": "...", "message": "...", "details"?: ...}}`:
 - `401 unauthorized` — нет или неверный токен (с заголовком `WWW-Authenticate: Bearer`) либо неверный пароль живой модели (без него);
 - `404 not_found`;
@@ -449,6 +453,7 @@ id всех записей — латиница в kebab-case, уникальн�
 | `LLM_FALLBACKS` | `true` | Серверный fallback Anthropic API при отказе модели |
 | `LIVE_DEMO_PASSWORD` | — | Живая модель за паролем на стенде в mock-режиме: без пароля — записанные ответы, с паролем на странице — живые модели (нужен шлюз или ключ Anthropic) |
 | `LIVE_DEMO_DAILY_LIMIT` | `200` | Живых запросов в сутки на экземпляр сервиса (на Vercel экземпляров может быть несколько — это страховка; точный предел — квота ключа в шлюзе) |
+| `TRUST_FORWARDED_FOR` | `false` (на Vercel — `true`) | Брать адрес клиента для защиты пароля живой модели из правой записи `X-Forwarded-For`. Только за прокси, который сам ставит заголовок (Vercel, nginx): иначе клиент подделает его и обойдёт блокировку подбора |
 | `LLM_GATEWAY_URL` | — | Адрес OpenAI-совместимого API шлюза, обычно `https://<шлюз>/v1`. Задаётся командой `python -m app.setup_gateway` |
 | `LLM_GATEWAY_KEY` | — | Ключ шлюза |
 | `LLM_GATEWAY_MODEL_CLAUDE` … `_GROK` | `claude-opus-5`, `glm-5.3`, `deepseek-v4-pro`, `kimi-k3`, `qwen3.8-max`, `grok-4.7` | id моделей в шлюзе (по умолчанию — как в New API) |

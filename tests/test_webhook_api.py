@@ -291,6 +291,7 @@ def test_vercel_defaults(monkeypatch):
         assert settings.db_path.as_posix().endswith("/tmp/ai-manager/app.db")
         assert settings.worker_enabled is False
         assert settings.worker_on_request is True
+        assert settings.trust_forwarded_for is True  # Vercel сам перезаписывает X-Forwarded-For
     finally:
         monkeypatch.delenv("VERCEL")
         importlib.reload(config_module)

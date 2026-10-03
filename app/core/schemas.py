@@ -94,9 +94,16 @@ class Suggestion(BaseModel):
 # ---------- Результат ядра ----------
 
 
+WarningField = Literal["client_reply", "upsell"]
+
+
 class GuardWarning(BaseModel):
     code: str
     message: str
+    # К какому блоку относится предупреждение и какой кусок его текста — по ним страница подсвечивает
+    # место в черновике. None — предупреждение про результат в целом или без точного места.
+    field: WarningField | None = None
+    fragment: str | None = None
 
 
 class Usage(BaseModel):

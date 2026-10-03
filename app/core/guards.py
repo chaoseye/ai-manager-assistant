@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from itertools import combinations, combinations_with_replacement
 
 from app.core.money import AMOUNT_RE, extract_amounts, group_digits
-from app.core.schemas import GuardWarning, Mode, Suggestion, SuggestRequest
+from app.core.schemas import GuardWarning, Mode, Suggestion, SuggestRequest, WarningField
 from app.kb.models import KnowledgeBase
 
 MAX_REPLY_CHARS = 1000
@@ -289,7 +289,8 @@ def _free_supported(sentence: str, clause: str, terms: _Terms) -> bool:
 
 
 def _unsupported_terms(text: str, terms: _Terms, staff_percents: set[float]) -> list[tuple[str, str]]:
-    """Проценты и «бесплатно», которых нет в БЗ и у менеджера: [(вид, как написано)].
+    """Проценты и «бесплатно», которых нет в БЗ и у менеджера: [(вид, как написано)]. Для «бесплатно»
+    «как написано» — всё предложение: оно и есть обещание, которое надо проверить.
 
     Смотрим только предложения без отрицания. Отрицание про другое в том же предложении проверку обманет —
     она страхует менеджера, а не заменяет его.
@@ -302,7 +303,7 @@ def _unsupported_terms(text: str, terms: _Terms, staff_percents: set[float]) -> 
                 found.append(("percent", raw))
         for clause in _CLAUSE_RE.split(sentence):
             if _FREE_RE.search(clause) and not _free_supported(sentence, clause, terms):
-                found.append(("free", sentence.strip()[:80]))
+                found.append(("free", sentence.strip()))
                 break
     return found
 
@@ -357,6 +358,19 @@ def _plain(text: str) -> str:
     return " ".join(_WORD_RE.findall(text.lower().replace("ё", "е")))
 
 
+def _phrase_in(text: str, phrase: str) -> str | None:
+    """Где в тексте стоит стоп-фраза — по тем же правилам, что и _plain: с начала слова, без учёта регистра,
+    «ё» и пробелов, окончание последнего слова может отличаться. Нужно, чтобы подсветить её в черновике."""
+    words = [
+        re.escape(word).replace("е", "[её]") for word in _WORD_RE.findall(phrase.lower().replace("ё", "е"))
+    ]
+    if not words:
+        return None
+    pattern = r"(?<![а-яёa-z0-9])" + r"[^а-яёa-z0-9]+".join(words) + r"[а-яёa-z0-9]*"
+    match = re.search(pattern, text, re.IGNORECASE)
+    return match.group(0) if match else None
+
+
 def _deal_product_ids(products: list[str], kb: KnowledgeBase) -> set[str]:
     """Товары сделки как id из БЗ. Сценарии демо передают id, а amoCRM — названия элементов каталога:
     их узнаём по названию товара в БЗ или по его отличительным словам («Монтаж стандартный»)."""
@@ -377,7 +391,8 @@ def _deal_product_ids(products: list[str], kb: KnowledgeBase) -> set[str]:
 def _terms_message(kind: str, raw: str, where: str) -> str:
     if kind == "percent":
         return f"Процент «{raw}» в {where} не из базы знаний — проверьте, не обещана ли скидка, которой нет."
-    return f"«{raw}» — в {where} что-то обещано бесплатно, а база знаний этого не подтверждает."
+    quoted = raw if len(raw) <= 80 else raw[:79] + "…"
+    return f"«{quoted}» — в {where} что-то обещано бесплатно, а база знаний этого не подтверждает."
 
 
 def _add_needs_human(suggestion: Suggestion, reason: str) -> None:
@@ -400,8 +415,8 @@ def apply_guards(
     result = suggestion.model_copy(deep=True)
     warnings: list[GuardWarning] = []
 
-    def warn(code: str, message: str) -> None:
-        warnings.append(GuardWarning(code=code, message=message))
+    def warn(code: str, message: str, field: WarningField | None = None, fragment: str | None = None) -> None:
+        warnings.append(GuardWarning(code=code, message=message, field=field, fragment=fragment))
 
     if mode == "upsell_only":
         result.client_reply = ""
@@ -418,20 +433,25 @@ def apply_guards(
             warn("unknown_kb_ref", f"Ссылка на несуществующую запись базы знаний удалена: «{ref}».")
     result.kb_refs = valid_refs
     if mode == "full" and result.answer_found_in_kb and not result.kb_refs:
-        warn("no_kb_refs", "Ответ помечен как найденный в базе знаний, но без ссылок на её записи.")
+        warn(
+            "no_kb_refs",
+            "Ответ помечен как найденный в базе знаний, но без ссылок на её записи.",
+            "client_reply",
+        )
 
     # Товары в допродаже.
     upsell = result.upsell
     valid_products = [pid for pid in dict.fromkeys(upsell.product_ids) if pid in kb.products_by_id]
     for pid in dict.fromkeys(upsell.product_ids):
         if pid not in kb.products_by_id:
-            warn("unknown_product", f"Несуществующий товар удалён из допродажи: «{pid}».")
+            warn("unknown_product", f"Несуществующий товар удалён из допродажи: «{pid}».", "upsell")
     upsell.product_ids = valid_products
     if upsell.recommended and not upsell.product_ids:
         upsell.recommended = False
         warn(
             "upsell_without_products",
             "Допродажа рекомендована без товаров из базы знаний — рекомендация снята.",
+            "upsell",
         )
 
     # Допродажа в ответе клиенту, хотя решение о ней за менеджером. Товары, которые клиент назвал сам
@@ -450,6 +470,7 @@ def apply_guards(
                     "upsell_in_reply",
                     f"Товар из допродажи «{product.name}» назван в ответе клиенту — "
                     "предлагать его или нет, решает менеджер.",
+                    "client_reply",
                 )
 
     # Допродажа при жалобе или негативе — «не предлагать» (правило допродаж 3): и «сейчас», и «после решения
@@ -457,7 +478,11 @@ def apply_guards(
     complaint = result.sentiment == "negative" or result.intent == "complaint"
     if complaint and upsell.timing in ("now", "after_resolution"):
         upsell.timing = "not_now"
-        warn("upsell_on_complaint", "Клиент недоволен — допродажа перенесена в «не предлагать сейчас».")
+        warn(
+            "upsell_on_complaint",
+            "Клиент недоволен — допродажа перенесена в «не предлагать сейчас».",
+            "upsell",
+        )
 
     # Суммы: только те, что выводятся из БЗ или их назвал менеджер.
     rules = amount_rules(kb)
@@ -486,18 +511,24 @@ def apply_guards(
                 "client_amount",
                 f"Сумму «{raw}» назвал клиент, а в базе знаний её нет — проверьте, что ответ "
                 "не подтверждает её как цену.",
+                "client_reply",
+                raw,
             )
             _add_needs_human(result, "Проверьте суммы, которые назвал клиент.")
         else:
             warn(
                 "price_not_in_kb",
                 f"Сумма «{raw}» в ответе клиенту не выводится из базы знаний — проверьте цену.",
+                "client_reply",
+                raw,
             )
             _add_needs_human(result, "Проверьте цены в ответе.")
     for raw, _ in _unexplained(upsell_amounts, reply_amounts + upsell_amounts, rules, staff):
         warn(
             "upsell_price_not_in_kb",
             f"Сумма «{raw}» в подсказке по допродаже не выводится из базы знаний — проверьте цену.",
+            "upsell",
+            raw,
         )
 
     # Скидки в процентах и «бесплатно»: на них давит prompt-injection, а суммой с валютой они не являются.
@@ -509,10 +540,10 @@ def apply_guards(
         for _, value in _percents(m.text)
     }
     for kind, raw in _unsupported_terms(result.client_reply, terms, staff_percents):
-        warn("terms_not_in_kb", _terms_message(kind, raw, "ответе клиенту"))
+        warn("terms_not_in_kb", _terms_message(kind, raw, "ответе клиенту"), "client_reply", raw)
         _add_needs_human(result, "Проверьте скидки и условия в ответе.")
     for kind, raw in _unsupported_terms(upsell.pitch, terms, staff_percents):
-        warn("upsell_terms_not_in_kb", _terms_message(kind, raw, "фразе допродажи"))
+        warn("upsell_terms_not_in_kb", _terms_message(kind, raw, "фразе допродажи"), "upsell", raw)
 
     # Внутренние термины в ответе клиенту.
     internal = _INTERNAL_RE.search(result.client_reply)
@@ -520,20 +551,32 @@ def apply_guards(
         warn(
             "internal_terms",
             f"Ответ клиенту упоминает внутреннее устройство помощника («{internal.group(0)}») — перепишите.",
+            "client_reply",
+            internal.group(0),
         )
 
     # Запрещённые фразы: «найдете» вместо «найдёте» и неразрывный пробел их не прячут. Фраза начинается
     # с начала слова, а конец может быть другим: «как я уже говорил» ловит и «…говорила».
-    for label, text in (("ответе клиенту", result.client_reply), ("фразе допродажи", upsell.pitch)):
+    places: tuple[tuple[str, WarningField, str], ...] = (
+        ("ответе клиенту", "client_reply", result.client_reply),
+        ("фразе допродажи", "upsell", upsell.pitch),
+    )
+    for label, field, text in places:
         plain = f" {_plain(text)}"
         for phrase in kb.forbidden_phrases:
             if f" {_plain(phrase)}" in plain:
-                warn("forbidden_phrase", f"Запрещённая фраза «{phrase}» в {label}.")
+                warn(
+                    "forbidden_phrase",
+                    f"Запрещённая фраза «{phrase}» в {label}.",
+                    field,
+                    _phrase_in(text, phrase),
+                )
 
     if len(result.client_reply) > MAX_REPLY_CHARS:
         warn(
             "reply_too_long",
             f"Ответ клиенту длиннее {MAX_REPLY_CHARS} символов ({len(result.client_reply)}).",
+            "client_reply",
         )
 
     return result, warnings
