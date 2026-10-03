@@ -21,6 +21,8 @@ CLOSED_STATUSES = frozenset({STATUS_WON, STATUS_LOST})
 SYSTEM_STATUS_NAMES = {STATUS_WON: "Успешно реализовано", STATUS_LOST: "Закрыто и не реализовано"}
 PIPELINES_TTL_SECONDS = 3600
 MAX_IDS_PER_REQUEST = 50
+EVENTS_PAGE_LIMIT = 100  # больше amoCRM за раз не отдаёт
+EVENTS_MAX_PAGES = 5
 
 NoteEntity = Literal["leads", "contacts"]
 
@@ -75,6 +77,22 @@ class AmoPipeline:
     statuses: dict[int, str]
 
 
+@dataclass(frozen=True)
+class AmoChatEvent:
+    """Запись журнала событий о сообщении в чате. Текста в ней нет — только id сообщения и беседа."""
+
+    message_id: str
+    talk_id: str | None
+    entity_type: str | None
+    entity_id: int | None
+    created_by: int  # id сотрудника; 0 — бот или интеграция
+    created_at: int  # Unix-время
+
+    @property
+    def by_user(self) -> bool:
+        return self.created_by > 0
+
+
 class RateLimiter:
     """Не чаще rps запросов в секунду: запросы стартуют с интервалом 1/rps."""
 
@@ -103,6 +121,32 @@ def _problem_detail(response: httpx.Response) -> str:
             parts.append(str(data["validation-errors"])[:300])
         return "; ".join(parts) or str(data)[:300]
     return str(data)[:300]
+
+
+def _chat_event_from_json(data: Any) -> AmoChatEvent | None:
+    if not isinstance(data, dict):
+        return None
+    after = data.get("value_after")
+    first = after[0] if isinstance(after, list) and after and isinstance(after[0], dict) else {}
+    message = first.get("message") if isinstance(first.get("message"), dict) else {}
+    message_id = str(message.get("id") or "").strip()
+    if not message_id:
+        return None
+    try:
+        created_at = int(data.get("created_at") or 0)
+        created_by = int(data.get("created_by") or 0)
+        entity_id = int(data["entity_id"]) if data.get("entity_id") else None
+    except (TypeError, ValueError):
+        return None
+    talk_id = message.get("talk_id")
+    return AmoChatEvent(
+        message_id=message_id,
+        talk_id=str(talk_id) if talk_id not in (None, "") else None,
+        entity_type=str(data["entity_type"]) if data.get("entity_type") else None,
+        entity_id=entity_id,
+        created_by=created_by,
+        created_at=created_at,
+    )
 
 
 def _lead_from_json(data: dict[str, Any]) -> AmoLead:
@@ -258,6 +302,27 @@ class AmoClient:
             for i in element_ids
             if (catalog_id, i) in self._catalog_names
         }
+
+    async def get_outgoing_chat_events(self, since: int) -> list[AmoChatEvent]:
+        """Исходящие сообщения чатов всего аккаунта, записанные в журнал событий начиная с since (Unix-время).
+
+        Вебхук о сообщении amoCRM иногда доставляет на минуты позже, а в журнале оно видно сразу. Фильтр
+        журнала по сделке на события чатов не действует (ответ пустой), поэтому беседу отбирает вызывающий.
+        """
+        events: list[AmoChatEvent] = []
+        for page in range(1, EVENTS_MAX_PAGES + 1):
+            params = {
+                "filter[type]": "outgoing_chat_message",
+                "filter[created_at][from]": str(since),
+                "limit": str(EVENTS_PAGE_LIMIT),
+                "page": str(page),
+            }
+            data = await self._request("GET", "/api/v4/events", params=params)
+            items = ((data or {}).get("_embedded") or {}).get("events") or []
+            events += [event for event in map(_chat_event_from_json, items) if event is not None]
+            if len(items) < EVENTS_PAGE_LIMIT:
+                break
+        return events
 
     # ---------- Запись ----------
 

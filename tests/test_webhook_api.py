@@ -1,5 +1,6 @@
 """Вебхук и amoCRM на уровне HTTP: секрет, аккаунт, формат, весь путь до примечания, health, настройки."""
 
+import logging
 from urllib.parse import urlencode
 
 import httpx
@@ -7,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.amocrm.webhooks import encode_nested_form
+from app.logging_setup import WebhookSecretFilter, configure_logging
 from app.main import ConfigError, create_app
 from tests.conftest import FakeLLM, make_settings, make_suggestion
 
@@ -75,7 +77,14 @@ def test_wrong_secret(mock_client):
 def test_full_path_to_note(mock_client):
     response = post_hook(mock_client, webhook_body())
     assert response.status_code == 200
-    assert response.json() == {"ok": True, "accepted": 1, "duplicates": 0, "scheduled": 1, "skipped": 0}
+    assert response.json() == {
+        "ok": True,
+        "accepted": 1,
+        "duplicates": 0,
+        "scheduled": 1,
+        "late": 0,
+        "skipped": 0,
+    }
     assert post_hook(mock_client, webhook_body()).json()["duplicates"] == 1
 
     app = mock_client.app
@@ -307,3 +316,19 @@ def test_mock_mode_without_secret_disables_webhook_only(tmp_path):
             json={"lead_id": 1234, "chat_id": "web-1", "text": "Сколько стоит?"},
         )
         assert sent.status_code == 200 and sent.json()["accepted"] == 1
+
+
+def test_webhook_secret_is_masked_in_access_log():
+    # Секрет — часть пути, а журнал запросов uvicorn пишет путь целиком: при проверке на живом аккаунте
+    # секрет был виден в каждой строке POST /webhooks/amocrm/….
+    record = logging.LogRecord(
+        "uvicorn.access", logging.INFO, __file__, 1, '%s - "%s %s HTTP/%s" %d',
+        ("1.2.3.4:0", "POST", f"/webhooks/amocrm/{SECRET}?x=1", "1.1", 200), None,
+    )  # fmt: skip
+    assert WebhookSecretFilter().filter(record)
+    message = record.getMessage()
+    assert SECRET not in message and '"POST /webhooks/amocrm/***?x=1 HTTP/1.1" 200' in message
+    configure_logging("INFO")
+    configure_logging("INFO")  # повторная настройка не навешивает второй фильтр
+    access = logging.getLogger("uvicorn.access")
+    assert sum(isinstance(f, WebhookSecretFilter) for f in access.filters) == 1

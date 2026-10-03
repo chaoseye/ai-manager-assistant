@@ -71,6 +71,19 @@ async def test_add_note_and_webhook(fake):
     assert fake.webhooks == [{"destination": "https://x/webhooks/amocrm/s", "settings": ["add_message"]}]
 
 
+async def test_outgoing_chat_events(fake):
+    for i in range(130):
+        fake.add_chat_event(f"msg-{i}", talk_id=17, created_at=1_000 + i, created_by=555 if i % 2 else 0)
+    fake.events.append({"type": "outgoing_chat_message", "created_at": 2_000, "value_after": []})  # без id
+    amo = make_client(fake.transport())
+    events = await amo.get_outgoing_chat_events(1_010)
+    # 121 запись с created_at ≥ 1010: страница из 100 и ещё одна; запись без сообщения пропущена.
+    assert len(events) == 120 and {e.talk_id for e in events} == {"17"}
+    assert events[0].message_id == "msg-129" and events[0].by_user and not events[1].by_user
+    assert [p for _, p in fake.requests].count("/api/v4/events") == 2
+    assert await amo.get_outgoing_chat_events(5_000) == []  # 204 — пусто
+
+
 async def test_wrong_token(fake):
     amo = make_client(fake.transport(), token="wrong")
     with pytest.raises(AmoAuthError):

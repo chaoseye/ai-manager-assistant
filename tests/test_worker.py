@@ -14,9 +14,10 @@ from app.amocrm.webhooks import ChatMessageEvent, WebhookBatch
 from app.config import BASE_DIR
 from app.core.assistant import Assistant
 from app.core.llm import LLMCall, LLMRefusedError, LLMResponse, LLMUnavailableError
+from app.core.prompts import REPLIES_NOTE
 from app.storage.db import Database, to_iso
 from app.storage.repo import DialogRepo, JobRepo, StoredMessage, SuggestionRepo
-from app.worker.processor import Inbox, Worker, split_dialog
+from app.worker.processor import UNSEEN_REPLY_TEXT, Inbox, Worker, merge_by_time, split_dialog
 from tests.conftest import FakeLLM, make_settings, make_suggestion
 
 SEED = BASE_DIR / "examples" / "amocrm" / "mock_account.json"
@@ -150,12 +151,20 @@ def test_split_dialog():
     assert split_dialog([_msg("1", "in"), _msg("2", "out", "user")]).manager_replied
 
 
+def test_merge_by_time_puts_unseen_reply_first_within_a_second():
+    stored = [_msg("1", "in"), _msg("2", "in")]
+    same_second = StoredMessage("r", "out", "user", None, "ответ", None, T0)
+    assert [m.amo_id for m in merge_by_time(stored, [same_second])] == ["r", "1", "2"]
+    later = StoredMessage("r2", "out", "user", None, "ответ", None, T0 + timedelta(seconds=1))
+    assert [m.amo_id for m in merge_by_time(stored, [later])] == ["1", "2", "r2"]
+
+
 # ---------- Основной путь ----------
 
 
 async def test_debounce_merges_messages_and_posts_note(env):
     result = await env.ingest(incoming("m1", "Здравствуйте!"))
-    assert result == {"accepted": 1, "duplicates": 0, "scheduled": 1, "skipped": 0}
+    assert result == {"accepted": 1, "duplicates": 0, "scheduled": 1, "late": 0, "skipped": 0}
     env.clock.advance(3)
     assert await env.worker.tick() == 0  # пауза ещё не прошла
     await env.ingest(incoming("m2", "Сколько стоит монтаж?", at=T0 + timedelta(seconds=3)))
@@ -432,6 +441,262 @@ async def test_messages_are_ordered_by_amo_time(env):
     await env.worker.tick()
     assert "<new_message>\nпервое\nвторое\n</new_message>" in env.llm.calls[0].user
     assert to_iso(T0).endswith("+00:00")
+
+
+# ---------- Опоздавшие вебхуки ----------
+# На живом аккаунте 03.10.2026 часть вебхуков пришла на минуты позже: «Здравствуйте» — через 104 с,
+# все три ответа менеджера — через 136–300 с. Сервис отвечал на каждый за десятки миллисекунд.
+
+
+def ts(moment: datetime) -> int:
+    return int(moment.timestamp())
+
+
+async def test_late_older_message_after_processing_is_only_stored(env):
+    await env.ingest(incoming("m2", "Сколько стоит монтаж?", at=T0 + timedelta(seconds=4)))
+    env.clock.advance(6)
+    await env.worker.tick()
+    result = await env.ingest(incoming("m1", "Здравствуйте", at=T0))  # написано раньше, дошло позже
+    assert result["late"] == 1 and result["scheduled"] == 0
+    env.clock.advance(6)
+    assert await env.worker.tick() == 0
+    assert len(env.fake.notes) == 1 and len(env.llm.calls) == 1
+    assert await job_statuses(env) == {"done": 1}
+    cursor = await env.db.conn.execute("SELECT COUNT(*) FROM messages")
+    assert (await cursor.fetchone())[0] == 2  # в историю встало
+
+
+async def test_late_message_does_not_move_pending_job(env):
+    await env.ingest(incoming("m2", "второе", at=T0 + timedelta(seconds=10)))
+    env.clock.advance(4)
+    await env.ingest(incoming("m1", "первое", at=T0))
+    cursor = await env.db.conn.execute("SELECT trigger_message_id, run_at FROM jobs")
+    row = await cursor.fetchone()
+    assert row["trigger_message_id"] == "m2" and row["run_at"] == to_iso(T0 + timedelta(seconds=6))
+    env.clock.advance(2)  # пауза считается от второго сообщения, опоздавшее её не сдвигает
+    assert await env.worker.tick() == 1
+    assert "<new_message>\nпервое\nвторое\n</new_message>" in env.llm.calls[0].user
+
+
+async def test_messages_in_the_same_second_are_not_late(env):
+    first = await env.ingest(incoming("m1", "Здравствуйте"))
+    second = await env.ingest(incoming("m2", "Сколько стоит монтаж?"))  # то же время amoCRM
+    assert first["scheduled"] == second["scheduled"] == 1 and second["late"] == 0
+
+
+async def test_late_message_during_generation_keeps_suggestion(env):
+    async def late_message() -> None:
+        await env.ingest(incoming("m0", "Здравствуйте", at=T0 - timedelta(seconds=5)))
+
+    env.make_worker(HookedLLM(make_suggestion(), hook=late_message))
+    await env.ingest(incoming("m1", "Сколько стоит монтаж?"))
+    env.clock.advance(6)
+    await env.worker.tick()
+    assert await job_statuses(env) == {"done": 1}  # не stale и без новой задачи
+    [note] = env.fake.notes
+    assert note["params"]["text"].startswith("Черновик ответа клиенту:")
+
+
+async def test_manager_reply_seen_only_in_events_gives_upsell_only(env):
+    env.make_worker(FakeLLM(make_suggestion(client_reply="", kb_refs=[])))
+    await env.ingest(incoming("m1", "Сколько стоит монтаж?"))
+    # Менеджер ответил через 3 с, вебхук об этом ещё в пути, а журнал событий уже знает.
+    env.fake.add_chat_event("o-late", talk_id=17, created_at=ts(T0) + 3, created_by=555)
+    env.clock.advance(6)
+    await env.worker.tick()
+    call = env.llm.calls[0]
+    assert call.mode == "upsell_only"
+    reply = f"[2026-09-29 12:00] Менеджер: {UNSEEN_REPLY_TEXT}"
+    assert f"<replies>\n{REPLIES_NOTE}\n{reply}\n</replies>" in call.user
+    [note] = env.fake.notes
+    assert note["params"]["text"].startswith("Менеджер уже ответил клиенту — черновик не нужен.")
+
+
+async def test_reply_in_events_splits_the_run(env):
+    # Как на живом аккаунте: клиент спросил, менеджер ответил (вебхук опаздывает), клиент написал ещё.
+    await env.ingest(
+        incoming("m1", "Сколько стоит монтаж?"),
+        incoming("m2", "А доставка сколько?", at=T0 + timedelta(seconds=40)),
+    )
+    env.fake.add_chat_event("o-late", talk_id=17, created_at=ts(T0) + 20, created_by=555)
+    env.clock.advance(6)
+    await env.worker.tick()
+    call = env.llm.calls[0]
+    assert call.mode == "full"
+    assert "<new_message>\nА доставка сколько?\n</new_message>" in call.user  # отвеченное — уже история
+    assert f"Клиент: Сколько стоит монтаж?\n[2026-09-29 12:00] Менеджер: {UNSEEN_REPLY_TEXT}" in call.user
+
+
+async def test_events_older_than_window_are_not_queried(env):
+    # Клиент пишет три часа без ответа; ответ старше двух часов вебхук уже доставил бы сам.
+    await env.ingest(
+        incoming("m1", "Сколько стоит монтаж?", at=T0 - timedelta(hours=3)),
+        incoming("m2", "Ау?", at=T0),
+    )
+    old = ts(T0 - timedelta(hours=2, minutes=30))
+    env.fake.add_chat_event("o-old", talk_id=17, created_at=old, created_by=555)
+    env.clock.advance(6)
+    await env.worker.tick()
+    assert "<new_message>\nСколько стоит монтаж?\nАу?\n</new_message>" in env.llm.calls[0].user
+
+
+async def test_reply_in_events_before_voice_gives_attachment_note(env):
+    await env.ingest(
+        incoming("m1", "Сколько стоит монтаж?"),
+        incoming("m2", "", at=T0 + timedelta(seconds=40), attachment="voice"),
+    )
+    env.fake.add_chat_event("o-late", talk_id=17, created_at=ts(T0) + 20, created_by=555)
+    env.clock.advance(6)
+    await env.worker.tick()
+    assert env.llm.calls == []
+    [note] = env.fake.notes
+    assert "вложение без текста (voice)" in note["params"]["text"]
+
+
+async def test_manager_reply_in_events_with_skip_mode(env):
+    worker = env.make_worker(FakeLLM(make_suggestion()), on_manager_replied="skip")
+    await env.ingest(incoming("m1", "Сколько стоит монтаж?"))
+    env.fake.add_chat_event("o-late", talk_id=17, created_at=ts(T0) + 3, created_by=555)
+    env.clock.advance(6)
+    await worker.tick()
+    assert env.llm.calls == [] and env.fake.notes == []
+    cursor = await env.db.conn.execute("SELECT status, error FROM jobs")
+    row = await cursor.fetchone()
+    assert row["status"] == "skipped" and "журнале событий" in row["error"]
+
+
+@pytest.mark.parametrize(
+    ("talk_id", "created_by", "delay"),
+    [
+        (17, 0, 3),  # бот или интеграция: created_by = 0
+        (99, 555, 3),  # другая беседа
+        (17, 555, 0),  # в ту же секунду, что и вопрос, — не ответ на него
+        (17, 555, -30),  # раньше вопроса
+    ],
+)
+async def test_events_that_are_not_a_reply_keep_full_mode(env, talk_id, created_by, delay):
+    await env.ingest(incoming("m1", "Сколько стоит монтаж?"))
+    env.fake.add_chat_event("o-x", talk_id=talk_id, created_at=ts(T0) + delay, created_by=created_by)
+    env.clock.advance(6)
+    await env.worker.tick()
+    assert env.llm.calls[0].mode == "full"
+    assert env.fake.notes[0]["params"]["text"].startswith("Черновик ответа клиенту:")
+
+
+async def test_delivered_message_is_not_recounted_from_events(env):
+    # Вебхук уже пришёл и назвал автора ботом (нет user_id) — верим ему, а не повторной записи в журнале.
+    await env.ingest(
+        incoming("m1", "Сколько стоит монтаж?"),
+        outgoing("o1", "Спасибо! Менеджер скоро ответит.", at=T0 + timedelta(seconds=1), bot=True),
+    )
+    env.fake.add_chat_event("o1", talk_id=17, created_at=ts(T0) + 1, created_by=555)
+    env.clock.advance(6)
+    await env.worker.tick()
+    assert env.llm.calls[0].mode == "full"
+
+
+@pytest.mark.parametrize(("lead", "mode"), [(1234, "upsell_only"), (1236, "full")])
+async def test_without_talk_id_reply_is_matched_by_lead(env, lead, mode):
+    await env.ingest(incoming("m1", "Сколько стоит монтаж?").model_copy(update={"talk_id": None}))
+    env.fake.add_chat_event("o-late", talk_id=None, created_at=ts(T0) + 3, created_by=555, entity_id=lead)
+    env.clock.advance(6)
+    await env.worker.tick()
+    assert env.llm.calls[0].mode == mode
+
+
+async def test_reply_during_generation_seen_in_events_drops_draft(env):
+    async def manager_reply() -> None:
+        env.fake.add_chat_event("o-late", talk_id=17, created_at=ts(T0) + 7, created_by=555)
+
+    env.make_worker(HookedLLM(make_suggestion(), hook=manager_reply))
+    await env.ingest(incoming("m1", "Сколько стоит монтаж?"))
+    env.clock.advance(6)
+    await env.worker.tick()
+    assert env.llm.calls[0].mode == "full"
+    [note] = env.fake.notes
+    assert note["params"]["text"].startswith("Менеджер уже ответил клиенту")
+    assert env.fake.requests.count(("GET", "/api/v4/events")) == 2  # до генерации и перед публикацией
+
+
+async def test_events_failure_falls_back_to_webhooks(env, caplog):
+    def broken_events(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v4/events":
+            return httpx.Response(500)
+        return env.fake.handle(request)
+
+    env.handler = broken_events
+    await env.ingest(incoming("m1", "Сколько стоит монтаж?"))
+    env.clock.advance(6)
+    await env.worker.tick()
+    assert env.llm.calls[0].mode == "full" and len(env.fake.notes) == 1
+    assert await job_statuses(env) == {"done": 1}
+    assert any(r.getMessage() == "amocrm_events_unavailable" for r in caplog.records)
+
+
+async def test_live_session_2026_10_03_replay(env):
+    """Сессия на живом аккаунте 03.10.2026 по секундам. Секунда 0 — 12:17:00. Каждое сообщение описано так:
+    время в amoCRM, когда пришёл вебхук, направление, текст. Ответы менеджера видны в журнале сразу,
+    а их вебхуки опаздывали на 136–300 с. Тогда вышло 6 примечаний, 5 из них — черновики на один и тот же
+    блок сообщений. Теперь каждое примечание отвечает на то, что клиент написал после ответа менеджера."""
+    worker = env.make_worker(FakeLLM(make_suggestion()), debounce_seconds=20)
+    timeline = [
+        (0, 1, "bot", "Оцените качество обслуживания от 1 до 10"),
+        (392, 496, "in", "Здравствуйте"),  # вебхук опоздал на 104 с
+        (396, 398, "in", "Нужен кондиционер в спальню 20 м²"),
+        (400, 401, "in", "Сколько будет с установкой?"),
+        (422, 557, "user", "Сейчас посчитаю"),
+        (466, 469, "voice", ""),
+        (485, 785, "user", "Вы прислали пустое сообщение"),  # 300 с — повтор amoCRM
+        (515, 518, "picture", "Такой подойдет?"),
+        (679, 878, "user", "Отправьте голосовое еще раз"),
+        (704, 708, "voice", ""),
+        (1059, 1085, "voice", ""),
+    ]
+    actions = []
+    for i, (written, delivered, kind, text) in enumerate(timeline):
+        at, msg_id = T0 + timedelta(seconds=written), f"msg-{i}"
+        if kind in ("user", "bot"):
+            event = outgoing(msg_id, text, at=at, bot=kind == "bot")
+            actions.append((written, lambda m=msg_id, w=written, k=kind: env.fake.add_chat_event(
+                m, talk_id=17, created_at=ts(T0) + w, created_by=0 if k == "bot" else 555
+            )))  # fmt: skip
+        else:
+            attachment = kind if kind in ("voice", "picture") else None
+            event = incoming(msg_id, text, at=at, attachment=attachment)
+        actions.append((delivered, lambda e=event: env.ingest(e)))
+    actions.sort(key=lambda item: item[0])
+    for second in range(0, 1130):
+        env.clock.now = T0 + timedelta(seconds=second)
+        for _, action in [a for a in actions if a[0] == second]:
+            result = action()
+            if asyncio.iscoroutine(result):
+                await result
+        await worker.tick()
+
+    kinds = [
+        "черновик" if text.startswith("Черновик ответа клиенту:") else
+        "голосовое" if "вложение без текста (voice)" in text else text
+        for text in (note["params"]["text"] for note in env.fake.notes)
+    ]  # fmt: skip
+    assert kinds == [
+        "черновик",  # 12:24:01, менеджер ещё не ответил
+        "голосовое",  # голосовое после ответа «Сейчас посчитаю», о котором вебхук ещё не пришёл
+        "черновик",  # только фото с подписью: всё до него уже отвечено
+        "голосовое",
+        "голосовое",
+    ]
+    assert [c.mode for c in env.llm.calls] == ["full", "full"]
+    assert "<new_message>\nТакой подойдет? [вложение: picture]\n</new_message>" in env.llm.calls[1].user
+    assert await job_statuses(env) == {"done": 5}  # «Здравствуйте» задачу не поставило
+
+
+async def test_attachment_only_does_not_query_events(env):
+    # Примечание о вложении пишется и после ответа менеджера, журнал тут ничего не меняет.
+    await env.ingest(incoming("m1", "", attachment="voice"))
+    env.clock.advance(6)
+    await env.worker.tick()
+    assert ("GET", "/api/v4/events") not in env.fake.requests
+    assert "вложение без текста (voice)" in env.fake.notes[0]["params"]["text"]
 
 
 async def test_concurrent_returning_and_commit_do_not_collide(tmp_path):
