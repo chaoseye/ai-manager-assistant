@@ -6,6 +6,7 @@ xfail(strict=True) — известный недочёт (см. шапку test_
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api import live as live_module
 from app.core.llm_registry import LLMRegistry
 from app.main import create_app
 from tests.conftest import FakeLLM, make_settings, make_suggestion
@@ -28,17 +29,55 @@ def test_lockout_for_one_address(stand):
     assert stand.post("/api/v1/live/login", json={"password": PASSWORD}).status_code == 429
 
 
-@pytest.mark.xfail(
-    strict=True, reason="адрес берётся из X-Forwarded-For клиента — блокировку подбора можно обойти"
-)
-def test_lockout_cannot_be_bypassed_with_forwarded_for(stand):
-    statuses = [
-        stand.post(
-            "/api/v1/live/login", json={"password": f"guess{i}"}, headers={"X-Forwarded-For": f"10.0.0.{i}"}
+def guesses(client, count, forwarded):
+    return [
+        client.post(
+            "/api/v1/live/login", json={"password": f"guess{i}"}, headers={"X-Forwarded-For": forwarded(i)}
         ).status_code
-        for i in range(30)
+        for i in range(count)
     ]
-    assert 429 in statuses
+
+
+def test_lockout_cannot_be_bypassed_with_forwarded_for(stand):
+    # Без доверенного прокси X-Forwarded-For не учитывается: адрес — из соединения.
+    statuses = guesses(stand, 30, lambda i: f"10.0.0.{i}")
+    assert statuses[:5] == [401] * 5 and set(statuses[5:]) == {429}
+
+
+@pytest.fixture
+def proxied_stand(tmp_path):
+    """Стенд за прокси, который дописывает адрес клиента справа (Vercel, nginx)."""
+    live = LLMRegistry({"grok": FakeLLM(make_suggestion())}, "grok")
+    settings = make_settings(tmp_path, live_demo_password=PASSWORD, trust_forwarded_for=True)
+    with TestClient(create_app(settings, live_llm=live)) as client:
+        yield client
+
+
+def test_behind_proxy_the_rightmost_address_counts(proxied_stand):
+    # Клиент пишет в заголовок что угодно, но правую запись добавил прокси — по ней и блокировка.
+    statuses = guesses(proxied_stand, 8, lambda i: f"10.0.0.{i}, 203.0.113.7")
+    assert statuses[:5] == [401] * 5 and set(statuses[5:]) == {429}
+    other = proxied_stand.post(
+        "/api/v1/live/login", json={"password": PASSWORD}, headers={"X-Forwarded-For": "198.51.100.1"}
+    )
+    assert other.status_code == 200  # другой клиент за тем же прокси не заблокирован
+
+
+def test_guessing_from_many_addresses_hits_the_total_limit(proxied_stand):
+    total = live_module.MAX_FAILURES_TOTAL
+    statuses = guesses(proxied_stand, total + 3, lambda i: f"203.0.113.{i}")
+    assert statuses[:total] == [401] * total and set(statuses[total:]) == {429}
+
+
+def test_failures_of_old_addresses_are_forgotten(proxied_stand, monkeypatch):
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(live_module.time, "monotonic", lambda: clock["now"])
+    guesses(proxied_stand, 40, lambda i: f"203.0.113.{i}")
+    clock["now"] += live_module.FAILURE_WINDOW_SECONDS + 1
+    guesses(proxied_stand, 20, lambda i: f"198.51.100.{i}")
+    live = proxied_stand.app.state.live_demo
+    assert len(live._failures) <= live_module.MAX_FAILURES_TOTAL
+    assert all(address.startswith("198.51.100.") for address in live._failures)
 
 
 def test_demo_page_can_send_api_token(tmp_path):

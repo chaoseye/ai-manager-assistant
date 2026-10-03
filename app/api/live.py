@@ -19,10 +19,16 @@ from pydantic import BaseModel, Field
 from app.core.assistant import Assistant
 
 HEADER = "X-Live-Password"
-MAX_FAILURES = 5
+MAX_FAILURES = 5  # неверных паролей с одного адреса за окно
+MAX_FAILURES_TOTAL = 50  # со всех адресов за окно: подбор с множества адресов тоже упирается в предел
 FAILURE_WINDOW_SECONDS = 600
 
 router = APIRouter(prefix="/api/v1/live", tags=["live"])
+
+
+def _expire(attempts: deque[float], now: float) -> None:
+    while attempts and now - attempts[0] > FAILURE_WINDOW_SECONDS:
+        attempts.popleft()
 
 
 class LiveDemo:
@@ -31,26 +37,41 @@ class LiveDemo:
         self.assistant = assistant
         self._daily_limit = daily_limit
         self._failures: dict[str, deque[float]] = {}
+        self._all_failures: deque[float] = deque()
         self._day = date.today()
         self._used = 0
 
-    def _blocked(self, client: str) -> bool:
-        attempts = self._failures.get(client)
-        if not attempts:
-            return False
+    def _blocked(self, client: str) -> str | None:
+        """Почему вход сейчас закрыт; None — открыт."""
         now = time.monotonic()
-        while attempts and now - attempts[0] > FAILURE_WINDOW_SECONDS:
-            attempts.popleft()
-        return len(attempts) >= MAX_FAILURES
+        _expire(self._all_failures, now)
+        if len(self._all_failures) >= MAX_FAILURES_TOTAL:
+            return "Слишком много неверных паролей — вход в живую модель закрыт на 10 минут"
+        attempts = self._failures.get(client)
+        if attempts is not None:
+            _expire(attempts, now)
+            if len(attempts) >= MAX_FAILURES:
+                return "Слишком много неверных паролей — попробуйте через 10 минут"
+        return None
+
+    def _remember_failure(self, client: str) -> None:
+        now = time.monotonic()
+        self._all_failures.append(now)
+        self._failures.setdefault(client, deque()).append(now)
+        if len(self._failures) > MAX_FAILURES_TOTAL:
+            # Адреса без свежих ошибок больше не нужны: память не растёт от перебора адресов.
+            for address in [
+                a for a, attempts in self._failures.items() if now - attempts[-1] > FAILURE_WINDOW_SECONDS
+            ]:
+                del self._failures[address]
 
     def check(self, password: str, client: str) -> None:
-        """401 — неверный пароль, 429 — слишком много неверных попыток с этого адреса."""
-        if self._blocked(client):
-            raise HTTPException(
-                status_code=429, detail="Слишком много неверных паролей — попробуйте через 10 минут"
-            )
+        """401 — неверный пароль, 429 — слишком много неверных попыток с этого адреса или со всех сразу."""
+        blocked = self._blocked(client)
+        if blocked:
+            raise HTTPException(status_code=429, detail=blocked)
         if not secrets.compare_digest(password.encode(), self._password):
-            self._failures.setdefault(client, deque()).append(time.monotonic())
+            self._remember_failure(client)
             raise HTTPException(status_code=401, detail="Неверный пароль живой модели")
         self._failures.pop(client, None)
 
@@ -65,9 +86,18 @@ class LiveDemo:
 
 
 def client_address(request: Request) -> str:
-    # На Vercel адрес клиента ставит сама платформа в X-Forwarded-For.
-    forwarded = request.headers.get("x-forwarded-for", "")
-    return forwarded.split(",")[0].strip() or (request.client.host if request.client else "unknown")
+    """Адрес клиента для защиты от подбора пароля.
+
+    Без доверенного прокси — адрес соединения: X-Forwarded-For клиент пишет сам, и каждый новый адрес
+    в нём обнулял бы блокировку. (Uvicorn сам подставляет адрес из X-Forwarded-For, только если соединение
+    пришло от доверенного прокси — по умолчанию 127.0.0.1.) С TRUST_FORWARDED_FOR — правая запись
+    X-Forwarded-For: её дописывает ближайший прокси, а Vercel заголовок целиком перезаписывает.
+    """
+    if request.app.state.settings.trust_forwarded_for:
+        forwarded = [part.strip() for part in request.headers.get("x-forwarded-for", "").split(",")]
+        if forwarded[-1]:
+            return forwarded[-1]
+    return request.client.host if request.client else "unknown"
 
 
 def get_live_demo(request: Request) -> LiveDemo:
