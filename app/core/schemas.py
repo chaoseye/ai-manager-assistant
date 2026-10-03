@@ -1,5 +1,6 @@
 """Модели входа и выхода ядра."""
 
+import unicodedata
 from datetime import datetime
 from typing import Literal
 
@@ -15,6 +16,14 @@ Timing = Literal["now", "after_resolution", "not_now"]
 
 
 # ---------- Вход ----------
+
+# Пробелы, переносы, управляющие и «форматирующие» символы (нулевой ширины, соединители, BOM): их не видно,
+# и сообщение только из них — пустое, хотя strip() его не очищает.
+_INVISIBLE_CATEGORIES = frozenset({"Cc", "Cf", "Zs", "Zl", "Zp"})
+
+
+def has_visible_text(text: str) -> bool:
+    return any(not ch.isspace() and unicodedata.category(ch) not in _INVISIBLE_CATEGORIES for ch in text)
 
 
 class DialogMessage(BaseModel):
@@ -49,7 +58,7 @@ class SuggestRequest(BaseModel):
     @classmethod
     def _message_not_blank(cls, value: str) -> str:
         value = value.strip()
-        if not value:
+        if not has_visible_text(value):
             raise ValueError("Текст обращения пустой")
         return value
 

@@ -35,21 +35,43 @@ class KBValidationError(Exception):
         super().__init__("База знаний не прошла проверку:\n" + "\n".join(f"- {e}" for e in errors))
 
 
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """SafeLoader, который не молчит о повторе ключа: «price» дважды в записи — ошибка с номером строки,
+    а не тихо взятое последнее значение."""
+
+    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict[Any, Any]:
+        self.flatten_mapping(node)
+        seen: set[Any] = set()
+        for key_node, _ in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            try:
+                duplicate = key in seen
+            except TypeError:  # нехешируемый ключ — о нём скажет сам SafeLoader
+                continue
+            if duplicate:
+                raise yaml.constructor.ConstructorError(
+                    "в записи", node.start_mark, f"ключ «{key}» повторяется", key_node.start_mark
+                )
+            seen.add(key)
+        return super().construct_mapping(node, deep=deep)
+
+
 def _parse_records(
     file_name: str, raw: str, model: type[RecordT], errors: list[str]
-) -> tuple[list[RecordT], set[str]]:
+) -> tuple[list[RecordT], set[str] | None]:
     """Возвращает валидные записи и id всех записей файла — в том числе тех, где ошибка в другом поле.
-    По вторым проверяются ссылки: иначе одна ошибка в цене порождает лавину «нет товара …»."""
+    По вторым проверяются ссылки: иначе одна ошибка в цене порождает лавину «нет товара …». None вместо id —
+    файл не разобрался целиком (ошибка YAML), и ссылки на его записи проверять не с чем."""
     try:
-        data = yaml.safe_load(raw)
+        data = yaml.load(raw, Loader=_UniqueKeyLoader)
     except yaml.YAMLError as exc:
         errors.append(f"{file_name}: ошибка YAML: {exc}")
-        return [], set()
+        return [], None
     if data is None:
         return [], set()
     if not isinstance(data, list):
         errors.append(f"{file_name}: на верхнем уровне должен быть список записей")
-        return [], set()
+        return [], None
 
     records: list[RecordT] = []
     declared_ids: set[str] = set()
@@ -100,11 +122,19 @@ def load_knowledge_base(kb_dir: Path) -> KnowledgeBase:
         if not path.is_file():
             errors.append(f"{file_name}: файл не найден")
             continue
-        raw[file_name] = path.read_text(encoding="utf-8")
+        try:
+            raw[file_name] = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            # Блокнот и Excel в Windows сохраняют в cp1251: без этого перезагрузка падала с 500.
+            errors.append(
+                f"{file_name}: файл не в кодировке UTF-8 (байт {exc.start}) — пересохраните его в UTF-8"
+            )
 
     products, declared_product_ids = _parse_records(
         PRODUCTS_FILE, raw.get(PRODUCTS_FILE, ""), Product, errors
     )
+    if PRODUCTS_FILE not in raw:
+        declared_product_ids = None  # файла нет или он не в UTF-8 — об этом уже сказано выше
     faq, _ = _parse_records(FAQ_FILE, raw.get(FAQ_FILE, ""), FaqItem, errors)
     policies, _ = _parse_records(POLICIES_FILE, raw.get(POLICIES_FILE, ""), Policy, errors)
     rules, _ = _parse_records(UPSELL_FILE, raw.get(UPSELL_FILE, ""), UpsellRule, errors)
@@ -132,14 +162,19 @@ def load_knowledge_base(kb_dir: Path) -> KnowledgeBase:
             else:
                 seen[record.id] = file_name
 
-    for product in products:
-        for ref in product.related:
-            if ref not in declared_product_ids:
-                errors.append(f"{PRODUCTS_FILE}: товар «{product.id}», поле «related»: нет товара «{ref}»")
-    for rule in rules:
-        for ref in rule.offer:
-            if ref not in declared_product_ids:
-                errors.append(f"{UPSELL_FILE}: правило «{rule.id}», поле «offer»: нет товара «{ref}»")
+    # Ссылки на товары — только если файл товаров прочитан: иначе каждая ссылка «битая», и одна ошибка
+    # кодировки или YAML порождает лавину «нет товара …».
+    if declared_product_ids is not None:
+        for product in products:
+            for ref in product.related:
+                if ref not in declared_product_ids:
+                    errors.append(
+                        f"{PRODUCTS_FILE}: товар «{product.id}», поле «related»: нет товара «{ref}»"
+                    )
+        for rule in rules:
+            for ref in rule.offer:
+                if ref not in declared_product_ids:
+                    errors.append(f"{UPSELL_FILE}: правило «{rule.id}», поле «offer»: нет товара «{ref}»")
 
     if errors:
         raise KBValidationError(errors)

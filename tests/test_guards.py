@@ -65,6 +65,25 @@ def test_invented_price_sets_needs_human(kb):
     assert suggestion.needs_human is False
 
 
+def test_invented_price_without_currency_is_caught(kb):
+    # «₽» модель может и не написать — выдуманная цена всё равно не должна уйти клиенту без проверки.
+    suggestion = make_suggestion(
+        client_reply="Basic 09 стоит 31 900, монтаж — отдельно.", kb_refs=["ac-basic-09"]
+    )
+    result, warnings = apply_guards(suggestion, kb, REQUEST, "full")
+    assert codes(warnings) == ["price_not_in_kb"]
+    assert (warnings[0].field, warnings[0].fragment) == ("client_reply", "31 900")
+    assert result.needs_human is True
+
+
+def test_right_price_without_currency_passes(kb):
+    suggestion = make_suggestion(
+        client_reply="Basic 09 стоит 32 900, монтаж — 9 900 ₽.", kb_refs=["ac-basic-09"]
+    )
+    _, warnings = apply_guards(suggestion, kb, REQUEST, "full")
+    assert warnings == []
+
+
 @pytest.mark.parametrize(
     "reply",
     [

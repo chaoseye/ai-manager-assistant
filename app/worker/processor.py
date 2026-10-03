@@ -19,7 +19,15 @@ from app.amocrm.webhooks import ELEMENT_LEAD, WebhookBatch
 from app.config import Settings
 from app.core.assistant import Assistant
 from app.core.llm import LLMError, LLMRefusedError, LLMUnavailableError
-from app.core.schemas import DialogMessage, LeadContext, Mode, Role, SuggestRequest, SuggestResult
+from app.core.schemas import (
+    DialogMessage,
+    LeadContext,
+    Mode,
+    Role,
+    SuggestRequest,
+    SuggestResult,
+    has_visible_text,
+)
 from app.storage.db import Database, utcnow
 from app.storage.repo import (
     JOB_DONE,
@@ -65,7 +73,12 @@ class DialogSplit:
 
     @property
     def has_text(self) -> bool:
-        return any(m.text.strip() for m in self.run)
+        # Символы нулевой ширины и прочие невидимые — не текст: с ними запрос к модели не прошёл бы проверку.
+        return any(has_visible_text(m.text) for m in self.run)
+
+    @property
+    def has_attachment(self) -> bool:
+        return any(m.attachment_type for m in self.run)
 
 
 def split_dialog(messages: list[StoredMessage]) -> DialogSplit | None:
@@ -294,6 +307,8 @@ class Worker:
         split = split_dialog(await self.dialogs.messages(dialog.id))
         if split is None:
             return JOB_SKIPPED, "в диалоге нет сообщений клиента"
+        if not split.has_text and not split.has_attachment:
+            return JOB_SKIPPED, "в сообщении клиента нет видимого текста"
 
         mode: Mode = "full"
         if split.manager_replied:

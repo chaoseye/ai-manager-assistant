@@ -1,7 +1,4 @@
-"""База знаний на испорченных файлах: любая ошибка — понятный KBValidationError, прежняя версия остаётся.
-
-xfail(strict=True) — известный недочёт (см. шапку test_money_pii_props.py).
-"""
+"""База знаний на испорченных файлах: любая ошибка — понятный KBValidationError, прежняя версия остаётся."""
 
 import shutil
 
@@ -44,15 +41,24 @@ def test_any_field_corruption_gives_readable_error(tmp_path_factory, field, valu
         assert exc.errors and all(isinstance(e, str) and e for e in exc.errors)
 
 
-@pytest.mark.xfail(strict=True, reason="повтор ключа в YAML (price дважды) молча берёт последнее значение")
 def test_duplicate_yaml_key_is_reported(kb_copy):
     path = kb_copy / "products.yaml"
     path.write_text(
         path.read_text(encoding="utf-8").replace("  price: 32900\n", "  price: 32900\n  price: 3290\n", 1),
         encoding="utf-8",
     )
-    with pytest.raises(KBValidationError):
+    with pytest.raises(KBValidationError) as exc:
         load_knowledge_base(kb_copy)
+    # Сообщение называет файл, ключ и строку — его можно исправить, не гадая.
+    message = " ".join(exc.value.errors)
+    assert "products.yaml" in message and "«price» повторяется" in message and "line" in message
+    # Файл товаров не разобрался — правила допродаж не сыплют «нет товара …» на каждую ссылку.
+    assert len(exc.value.errors) == 1
+
+
+def test_same_key_in_different_records_is_fine(kb_copy):
+    # Повтор ключа — только внутри одной записи; «price» у каждого товара — нормально.
+    assert len(load_knowledge_base(kb_copy).products) > 1
 
 
 def test_empty_forbidden_section_turns_check_off(kb_copy):
@@ -74,13 +80,25 @@ def kb_api(tmp_path, kb_copy):
         yield client, kb_copy
 
 
-@pytest.mark.xfail(strict=True, reason="файл в cp1251 (Блокнот, Excel) даёт 500 вместо 422 kb_invalid")
 def test_cp1251_file_gives_readable_error(kb_api):
     client, kb_dir = kb_api
     path = kb_dir / "faq.yaml"
     path.write_bytes(path.read_text(encoding="utf-8").encode("cp1251", errors="replace"))
     response = client.post("/api/v1/kb/reload")
     assert response.status_code == 422 and response.json()["error"]["code"] == "kb_invalid"
+    errors = " ".join(response.json()["error"]["details"])
+    assert "faq.yaml" in errors and "UTF-8" in errors
+    # Прежняя версия БЗ продолжает работать.
+    assert client.get("/health").json()["status"] == "ok"
+
+
+def test_cp1251_file_at_start_lists_only_the_encoding_problem(kb_copy):
+    path = kb_copy / "products.yaml"
+    path.write_bytes(path.read_text(encoding="utf-8").encode("cp1251", errors="replace"))
+    with pytest.raises(KBValidationError) as exc:
+        load_knowledge_base(kb_copy)
+    # Нечитаемый файл — одна ошибка, а не лавина «нет товара …» в правилах допродаж.
+    assert len(exc.value.errors) == 1 and "UTF-8" in exc.value.errors[0]
 
 
 def test_files_with_bom_load(kb_api):

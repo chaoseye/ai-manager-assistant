@@ -71,6 +71,12 @@ def test_bad_input_exit_code(tmp_path, capsys):
     assert "Ошибка" in capsys.readouterr().err
 
 
+def test_invisible_text_is_bad_input(capsys):
+    # Пробел нулевой ширины и BOM: str.strip() их не убирает, а текста для модели нет.
+    assert cli.main(["​﻿"]) == cli.EXIT_BAD_INPUT
+    assert "Нужен текст обращения" in capsys.readouterr().err
+
+
 def test_llm_error_exit_code(monkeypatch, capsys):
     from app.core.llm import LLMUnavailableError
     from tests.conftest import FakeLLM

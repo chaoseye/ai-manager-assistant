@@ -304,6 +304,24 @@ async def test_attachment_with_text_goes_to_model(env):
     assert "Вот фото окна [вложение: picture]" in env.llm.calls[0].user
 
 
+async def test_invisible_text_is_skipped_without_model(env):
+    # Символы нулевой ширины — не текст: запрос к модели не прошёл бы проверку, а примечание не нужно.
+    await env.ingest(incoming("m1", "​⁠﻿"))
+    env.clock.advance(6)
+    await env.worker.tick()
+    assert env.llm.calls == [] and env.fake.notes == []
+    assert await job_statuses(env) == {"skipped": 1}
+
+
+async def test_invisible_text_with_attachment_is_an_attachment(env):
+    await env.ingest(incoming("m1", "​", attachment="picture"))
+    env.clock.advance(6)
+    await env.worker.tick()
+    assert env.llm.calls == []
+    [note] = env.fake.notes
+    assert "вложение без текста (picture)" in note["params"]["text"]
+
+
 # ---------- Ошибки и повторы ----------
 
 

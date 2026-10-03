@@ -1,7 +1,4 @@
-"""Проверки ответа модели: инварианты на случайных ответах (hypothesis) и попытки обойти проверки.
-
-xfail(strict=True) — известный недочёт (см. шапку test_money_pii_props.py).
-"""
+"""Проверки ответа модели: инварианты на случайных ответах (hypothesis) и попытки обойти проверки."""
 
 import time
 
@@ -10,7 +7,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from app.core.guards import amount_rules, apply_guards, is_amount_allowed
-from app.core.schemas import DialogMessage, LeadContext, Suggestion, SuggestRequest, Upsell
+from app.core.schemas import DialogMessage, LeadContext, Suggestion, SuggestRequest, Upsell, has_visible_text
 from tests.conftest import make_suggestion
 
 REQUEST = SuggestRequest(message="Сколько стоит?")
@@ -66,7 +63,7 @@ def suggestions(draw):
 
 @given(suggestions(), texts, st.sampled_from(["full", "upsell_only"]))
 def test_guards_invariants(kb, suggestion, message, mode):
-    request = SuggestRequest(message=message.strip() or "?")
+    request = SuggestRequest(message=message if has_visible_text(message) else "?")
     before = suggestion.model_dump()
     result, warnings = apply_guards(suggestion, kb, request, mode)
 
