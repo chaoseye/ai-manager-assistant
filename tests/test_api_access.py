@@ -3,6 +3,8 @@
 xfail(strict=True) — известный недочёт (см. шапку test_money_pii_props.py).
 """
 
+import re
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -107,13 +109,38 @@ def test_error_handler_keeps_exception_headers(client):
     assert "POST" in client.get("/api/v1/suggest").headers.get("allow", "")
 
 
-@pytest.mark.xfail(
-    strict=True, reason="у HTML-страниц нет защитных заголовков (CSP, nosniff, frame-ancestors)"
-)
-def test_html_pages_have_security_headers(client):
-    headers = client.get("/").headers
+@pytest.mark.parametrize("path", ["/", "/amocrm"])
+def test_demo_pages_have_strict_csp(client, path):
+    headers = client.get(path).headers
+    csp = headers.get("content-security-policy", "")
+    assert "default-src 'self'" in csp and "frame-ancestors 'none'" in csp and "'unsafe-inline'" not in csp
+    assert headers.get("x-frame-options") == "DENY"
     assert headers.get("x-content-type-options") == "nosniff"
-    assert "frame-ancestors" in headers.get("content-security-policy", "")
+    assert headers.get("referrer-policy") == "same-origin"
+
+
+@pytest.mark.parametrize("path", ["/", "/amocrm"])
+def test_demo_pages_load_nothing_inline_or_foreign(client, path):
+    # Строгий CSP не ломает страницы, только пока в них нет встроенных скриптов, стилей и чужих адресов.
+    html = client.get(path).text
+    assert "<style" not in html and "style=" not in html
+    scripts = re.findall(r"<script([^>]*)>(.*?)</script>", html, re.S)
+    assert scripts, "на странице должны быть свои скрипты"
+    for attributes, body in scripts:
+        assert re.search(r'src="http://testserver/static/[\w.]+\?v=\w+"', attributes) and not body.strip()
+    absolute = re.findall(r'(?:href|src)="(https?://[^"]+)"', html)
+    assert all(url.startswith("http://testserver/") for url in absolute), absolute
+
+
+def test_api_docs_keep_their_scripts_but_cannot_be_framed(client):
+    headers = client.get("/docs").headers
+    assert headers.get("content-security-policy") == "frame-ancestors 'none'"  # Swagger грузит скрипты с CDN
+
+
+def test_json_responses_are_not_sniffed(client):
+    headers = client.get("/health").headers
+    assert headers.get("x-content-type-options") == "nosniff"
+    assert "content-security-policy" not in headers
 
 
 @pytest.mark.xfail(strict=True, reason="429 приходит с кодом http_error")

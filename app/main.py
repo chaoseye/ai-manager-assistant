@@ -30,6 +30,30 @@ from app.worker.processor import Inbox, Worker
 STATIC_DIR = Path(__file__).resolve().parent / "web" / "static"
 logger = logging.getLogger(__name__)
 
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "same-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
+}
+# Страницы демо грузят только свои скрипты и стили, без встроенного кода: всё остальное запрещено, и
+# вставленная в черновик разметка не выполнится, даже если где-то попадёт в HTML.
+PAGE_CSP = (
+    "default-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'self'; "
+    "form-action 'self'; frame-ancestors 'none'"
+)
+PAGES = frozenset({"/", "/amocrm"})
+# Остальной HTML (документация API берёт скрипты с CDN) — только запрет встраивания в чужие страницы.
+FRAME_CSP = "frame-ancestors 'none'"
+
+
+def _add_security_headers(request: Request, response: Response) -> None:
+    for name, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    if response.headers.get("content-type", "").startswith("text/html"):
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        csp = PAGE_CSP if request.url.path in PAGES else FRAME_CSP
+        response.headers.setdefault("Content-Security-Policy", csp)
+
 
 class ConfigError(RuntimeError):
     pass
@@ -137,6 +161,7 @@ def create_app(
         finally:
             request_id_var.reset(token)
         response.headers["X-Request-ID"] = request_id
+        _add_security_headers(request, response)
         return response
 
     app.include_router(suggest.router)
