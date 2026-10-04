@@ -131,7 +131,7 @@ Testovoe_O_Complex/
 │   └── amocrm/mock_account.json # «аккаунт» поддельного amoCRM: воронка, сделки, контакты, каталог
 ├── tests/                       # раздел 12
 ├── evals/                       # раздел 12
-├── widget/                      # виджет amoCRM, упаковывается в zip (этап 3)
+├── widget/                      # этап 3, папки пока нет: виджет amoCRM, упаковывается в zip
 ├── docs/                        # TZ, FUNCTIONALITY, STRUCTURE, AI_USAGE; screenshots/ — для README
 ├── data/                        # SQLite (в .gitignore, volume в Docker)
 ├── .env.example
@@ -140,6 +140,7 @@ Testovoe_O_Complex/
 ├── .github/workflows/ci.yml     # GitHub Actions: ruff и pytest (Python 3.11, 3.12), сборка и запуск образа
 ├── vercel.json                  # онлайн-демо: регион, mock-режимы, что не попадает в функцию
 ├── pyproject.toml               # зависимости, ruff, pytest, команда ai-assistant, точка входа для Vercel
+├── LICENSE                      # MIT
 └── README.md
 ```
 
