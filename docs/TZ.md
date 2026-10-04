@@ -164,9 +164,9 @@
 - репозиторий с кодом;
 - `README.md`: запуск, настройка токена и вебхуков amoCRM;
 - `.env.example`;
-- онлайн-демо на Vercel в mock-режиме (README, раздел «Развёртывание на Vercel»);
+- онлайн-демо на Vercel в mock-режиме (README, раздел «Развёртывание на Vercel»; подробности — [DEPLOY.md](DEPLOY.md));
 - демо-БЗ в `knowledge_base/`;
-- `docs/` — этот ТЗ, [FUNCTIONALITY.md](FUNCTIONALITY.md), [STRUCTURE.md](STRUCTURE.md), `AI_USAGE.md` (какие ИИ-инструменты использовались, ключевые промпты, что пришлось править вручную);
+- `docs/` — этот ТЗ, [FUNCTIONALITY.md](FUNCTIONALITY.md), [STRUCTURE.md](STRUCTURE.md), `AI_USAGE.md` (какие ИИ-инструменты использовались, ход работы и ключевые решения, что ассистент проверял и исправлял); [DEPLOY.md](DEPLOY.md) — развёртывание; [DEMO.md](DEMO.md) — заметки для живого показа;
 - отчёт по eval-прогону в `evals/reports/`.
 
 ## 12. Вне рамок MVP
