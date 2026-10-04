@@ -132,7 +132,7 @@ Testovoe_O_Complex/
 ├── tests/                       # раздел 12
 ├── evals/                       # раздел 12
 ├── widget/                      # этап 3, папки пока нет: виджет amoCRM, упаковывается в zip
-├── docs/                        # TZ, FUNCTIONALITY, STRUCTURE, AI_USAGE; screenshots/ — для README
+├── docs/                        # TZ, FUNCTIONALITY, STRUCTURE, AI_USAGE, DEPLOY, DEMO; screenshots/ — для README
 ├── data/                        # SQLite (в .gitignore, volume в Docker)
 ├── .env.example
 ├── .gitignore, .dockerignore
