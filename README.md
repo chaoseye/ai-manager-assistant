@@ -375,3 +375,7 @@ vercel env add LLM_GATEWAY_KEY production
 - [docs/FUNCTIONALITY.md](docs/FUNCTIONALITY.md) — сценарии, правила генерации, проверки, крайние случаи;
 - [docs/STRUCTURE.md](docs/STRUCTURE.md) — архитектура, модули, данные, API, конфигурация;
 - [docs/AI_USAGE.md](docs/AI_USAGE.md) — как проект собирался с помощью ИИ.
+
+## Лицензия
+
+MIT — см. [LICENSE](LICENSE).
